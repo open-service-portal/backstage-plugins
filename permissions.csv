@@ -48,6 +48,6 @@ p, role:default/platformteam, kubernetes-resources.secrets.view-yaml, read, allo
 p, role:default/platformteam, kubernetes-resources.resources.list, read, allow
 p, role:default/platformteam, kubernetes-resources.events.show, read, allow
 p, role:default/platformteam, kubernetes-resources.yaml.view, read, allow
-p, role:default/platformteam, educates.workshop-sessions.create, create, allow
-p, role:default/platformteam, educates.workshops.view, read, allow
+p, role:default/platformteam, educates.workshop.start, create, allow
+p, role:default/platformteam, educates.portal.view, read, allow
 g, group:default/all_users, role:default/platformteam
