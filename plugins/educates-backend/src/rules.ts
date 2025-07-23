@@ -20,14 +20,16 @@ export interface EducatesWorkshopResource {
 
 // Create permission resource references
 export const educatesPortalPermissionResourceRef = createPermissionResourceRef<
-  EducatesPortalResource
+  EducatesPortalResource,
+  unknown
 >().with({
   pluginId: 'educates',
   resourceType: EDUCATES_TRAINING_PORTAL_RESOURCE_TYPE,
 });
 
 export const educatesWorkshopPermissionResourceRef = createPermissionResourceRef<
-  EducatesWorkshopResource
+  EducatesWorkshopResource,
+  unknown
 >().with({
   pluginId: 'educates',
   resourceType: EDUCATES_WORKSHOP_RESOURCE_TYPE,
@@ -41,7 +43,7 @@ export const isPortalOwner = createPermissionRule({
   paramsSchema: z.object({
     userRefs: z.array(z.string()).describe('User entity refs to match'),
   }),
-  apply: (resource: EducatesPortalResource, { userRefs }) => {
+  apply: (_resource: EducatesPortalResource, { userRefs }) => {
     // For now, allow all users - this can be extended with actual ownership logic
     // You could check if the user is in a specific group or has specific permissions
     return userRefs.length > 0;
@@ -49,7 +51,7 @@ export const isPortalOwner = createPermissionRule({
   toQuery: () => {
     // Return a query that doesn't filter anything for now
     // This would need to be implemented based on your data storage
-    return {};
+    return { anyOf: [] };
   },
 });
 
@@ -67,8 +69,7 @@ export const hasPortalAccess = createPermissionRule({
   },
   toQuery: ({ portalName }) => {
     return {
-      key: 'portalName',
-      values: [portalName],
+      anyOf: [portalName],
     };
   },
 });
@@ -81,12 +82,12 @@ export const isWorkshopOwner = createPermissionRule({
   paramsSchema: z.object({
     userRefs: z.array(z.string()).describe('User entity refs to match'),
   }),
-  apply: (resource: EducatesWorkshopResource, { userRefs }) => {
+  apply: (_resource: EducatesWorkshopResource, { userRefs }) => {
     // For now, allow all users - this can be extended with actual ownership logic
     return userRefs.length > 0;
   },
   toQuery: () => {
-    return {};
+    return { anyOf: [] };
   },
 });
 
@@ -106,8 +107,7 @@ export const hasWorkshopAccess = createPermissionRule({
   },
   toQuery: ({ portalName, workshopName }) => {
     return {
-      key: 'workshop',
-      values: [`${portalName}:${workshopName}`],
+      anyOf: [`${portalName}:${workshopName}`],
     };
   },
 });

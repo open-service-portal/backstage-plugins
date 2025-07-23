@@ -139,10 +139,40 @@ export async function createRouter(
     }
 
     try {
-      // Check permission to start this specific workshop
+      // Get access token first to fetch workshop catalog
+      const tokenData = await getAccessToken(portal);
+      const accessToken = tokenData.access_token;
+
+      // Get workshops catalog to find the workshop name for permission checking
+      const catalogResponse = await fetch(`${portal.url}/workshops/catalog/workshops/`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (!catalogResponse.ok) {
+        logger.error(`Failed to get workshops catalog: ${catalogResponse.status} ${catalogResponse.statusText}`);
+        throw new Error(`Failed to get workshops catalog: ${catalogResponse.statusText}`);
+      }
+
+      const catalogData = await catalogResponse.json();
+      logger.info(`Looking for workshop with environment name: ${workshopEnvName}`);
+      logger.info(`Available workshops: ${catalogData.workshops?.map((w: any) => `${w.name} (env: ${w.environment.name})`).join(', ')}`);
+      
+      const workshop = catalogData.workshops?.find((w: any) => w.environment.name === workshopEnvName);
+      
+      if (!workshop) {
+        logger.error(`Workshop not found with environment name: ${workshopEnvName}`);
+        res.status(404).json({ error: `Workshop not found with environment name: ${workshopEnvName}` });
+        return;
+      }
+
+      logger.info(`Found workshop: ${workshop.name} for permission check`);
+
+      // Check permission to start this specific workshop using workshop name
       const credentials = await httpAuth.credentials(req, { allow: ['user'] });
       const decision = await permissions.authorize(
-        [{ permission: workshopStartPermission, resourceRef: `${portalName}:${workshopEnvName}` }],
+        [{ permission: workshopStartPermission, resourceRef: `${portalName}:${workshop.name}` }],
         { credentials }
       );
 
@@ -150,13 +180,13 @@ export async function createRouter(
         res.status(403).json({ error: 'Access denied to start this workshop' });
         return;
       }
-
-      // Get access token
-      const tokenData = await getAccessToken(portal);
-      const accessToken = tokenData.access_token;
-
-      // Request workshop session
-      const sessionResponse = await fetch(`${portal.url}/workshops/catalog/${workshopEnvName}/request/`, {
+      const appBaseUrl = config.getString('app.baseUrl');
+      const indexUrl = `${appBaseUrl}/educates`;
+      // Request workshop session using the correct Educates API endpoint
+      const sessionUrl = `${portal.url}/workshops/environment/${workshopEnvName}/request/?index_url=${encodeURIComponent(indexUrl)}`;
+      logger.info(`Requesting workshop session from: ${sessionUrl}`);
+      
+      const sessionResponse = await fetch(sessionUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -164,11 +194,16 @@ export async function createRouter(
       });
 
       if (!sessionResponse.ok) {
+        logger.error(`Workshop session request failed: ${sessionResponse.status} ${sessionResponse.statusText}`);
+        logger.error(`Request URL: ${sessionUrl}`);
         throw new Error(`Failed to request workshop session: ${sessionResponse.statusText}`);
       }
 
       const sessionData = await sessionResponse.json();
-      res.json(sessionData);
+      res.json({
+        ...sessionData,
+        url: `${portal.url}${sessionData.url}` 
+      });
     } catch (err) {
       logger.error(`Failed to request workshop: ${err}`);
       res.status(500).json({ error: 'Failed to request workshop' });
