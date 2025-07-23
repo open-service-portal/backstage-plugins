@@ -73,6 +73,7 @@ Workload Resource Annotations:
   terasky.backstage.io/techdocs-path: string
   terasky.backstage.io/kubernetes-label-selector: string
   terasky.backstage.io/component-type: string
+  terasky.backstage.io/subcomponent-of: string
   terasky.backstage.io/lifecycle: string
   terasky.backstage.io/dependsOn: string
   terasky.backstage.io/providesApis: string
