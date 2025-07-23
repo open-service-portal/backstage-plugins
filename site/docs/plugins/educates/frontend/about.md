@@ -66,10 +66,22 @@ Interface for managing multiple training portals:
 - Permission framework
 
 ### Permission Framework
-Built-in support for Backstage's permission system:
+Built-in support for Backstage's resource-based permission system:
 
-- `educates.workshops.view`: Required for viewing workshops
-- `educates.workshop-sessions.create`: Required for launching sessions
+- **`educates.portal.view`**: Required for viewing and accessing specific training portals
+  - Resource-based permission that controls access to individual portals
+  - Supports conditional access based on user roles and portal ownership
+
+- **`educates.workshop.start`**: Required for launching workshop sessions
+  - Resource-based permission that controls access to individual workshops
+  - Supports fine-grained access control per workshop
+
+### Deprecated Permissions
+
+⚠️ **The following permissions are removed in this version:**
+
+- `educates.workshops.view` → Use `educates.portal.view` instead
+- `educates.workshop-sessions.create` → Use `educates.workshop.start` instead
 
 ### Type Definitions
 Utilizes shared types from the common package:
@@ -82,16 +94,38 @@ Utilizes shared types from the common package:
 ## User Experience
 
 ### Workshop Discovery
-1. Navigate to the Workshops page
+1. Navigate to the Workshops page (requires `educates.portal.view` permission)
 2. Browse available workshops by portal
-4. View detailed workshop information
+3. View detailed workshop information
 
 ### Workshop Launch
 1. Select desired workshop
 2. Review workshop details
-3. Click launch button
+3. Click launch button (requires `educates.workshop.start` permission)
 4. Access workshop in new browser tab
 
 ### Session Management
 1. View active sessions
 2. Monitor session status
+
+## Permission Requirements
+
+To use the frontend plugin, users need appropriate permissions:
+
+### Basic Access
+- **`educates.portal.view`**: Required to view the workshops page and browse available workshops
+- **`educates.workshop.start`**: Required to launch workshop sessions
+
+### Advanced Access Control
+The plugin supports resource-based permissions that can be configured for:
+- Specific training portals
+- Individual workshops
+- Conditional access based on user roles
+- Portal and workshop ownership rules
+
+### Permission Integration
+The frontend automatically handles permission checks:
+- Workshop browse functionality requires portal view permissions
+- Launch buttons are only enabled for workshops the user can start
+- Portal switching respects portal-specific access controls
+- Workshop cards display appropriate access indicators

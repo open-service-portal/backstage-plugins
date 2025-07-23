@@ -7,8 +7,7 @@ import { educatesApiRef } from '../api/EducatesClient';
 import { 
   WorkshopsCatalogResponse, 
   TrainingPortalInfo,
-  EDUCATES_VIEW_WORKSHOPS,
-  EDUCATES_CREATE_WORKSHOP_SESSIONS,
+  portalViewPermission,
 } from '@terasky/backstage-plugin-educates-common';
 import { 
   Progress, 
@@ -111,19 +110,17 @@ export const EducatesPage = () => {
   // Check if permissions are enabled
   const enablePermissions = config.getOptionalBoolean('educates.enablePermissions') ?? false;
 
-  // Check permissions for each portal
+  // Check permissions for each portal using conditional permissions
   const portalPermissions = trainingPortals.map(portal => {
     const { allowed: canView, loading: viewLoading } = usePermission({
-      permission: EDUCATES_VIEW_WORKSHOPS
+      permission: portalViewPermission,
+      resourceRef: portal.name,
     });
-    const { allowed: canCreate, loading: createLoading } = usePermission({
-      permission: EDUCATES_CREATE_WORKSHOP_SESSIONS
-    });
+
     return {
       portalName: portal.name,
       canView: enablePermissions ? canView : true,
-      canCreate: enablePermissions ? canCreate : true,
-      loading: viewLoading || createLoading,
+      loading: viewLoading,
     };
   });
 
@@ -161,13 +158,6 @@ export const EducatesPage = () => {
     portalName: string,
     workshopEnvName: string,
   ) => {
-    // Check if user has permission to create workshop sessions
-    const portalPermission = portalPermissions.find(p => p.portalName === portalName);
-    if (enablePermissions && !portalPermission?.canCreate) {
-      setError(new Error('You do not have permission to start workshop sessions in this portal'));
-      return;
-    }
-
     try {
       const session = await educatesApi.requestWorkshop(
         portalName,
@@ -259,10 +249,6 @@ export const EducatesPage = () => {
         <div className={classes.mainContent}>
           <Grid container spacing={3}>
             {portalsData.map(portalData => {
-              const portalPermission = portalPermissions.find(
-                p => p.portalName === portalData.configName
-              );
-
               return (
                 <Grid key={portalData.portal.name} item xs={12}>
                   <TrainingPortalHeader 
@@ -274,13 +260,14 @@ export const EducatesPage = () => {
                         <Grid key={workshop.name} item xs={12} sm={6} md={4}>
                           <WorkshopCard
                             workshop={workshop}
+                            portalName={portalData.configName}
                             onStartWorkshop={() =>
                               handleStartWorkshop(
                                 portalData.configName,
                                 workshop.environment.name,
                               )
                             }
-                            canStart={!enablePermissions || (portalPermission?.canCreate ?? false)}
+                            enablePermissions={enablePermissions}
                           />
                         </Grid>
                       ))}

@@ -28,6 +28,46 @@ The Educates backend plugin provides the server-side functionality required to i
 ### Multi-Portal Support
 - Multiple portal configurations out of the box
 
+### Permission Framework
+- Resource-based permission system
+- Conditional permission rules
+- Portal and workshop-specific access control
+- Advanced permission conditions and decision making
+
+## Permission Framework
+
+The backend plugin provides a comprehensive permission framework with resource-based access control:
+
+### Permission Resources
+
+The plugin defines two main resource types:
+
+- **Training Portal Resource (`educates-training-portal`)**
+  - Controls access to specific training portals
+  - Supports portal ownership and access rules
+
+- **Workshop Resource (`educates-workshop`)**
+  - Controls access to individual workshops
+  - Supports workshop-specific permissions
+
+### Permission Rules
+
+#### Portal Permission Rules
+- **`IS_PORTAL_OWNER`**: Grants access to users who own a training portal
+- **`HAS_PORTAL_ACCESS`**: Grants access to users with specific portal permissions
+
+#### Workshop Permission Rules
+- **`IS_WORKSHOP_OWNER`**: Grants access to users who own a workshop
+- **`HAS_WORKSHOP_ACCESS`**: Grants access to users with specific workshop permissions
+
+### Conditional Permissions
+
+The plugin supports conditional permission decisions through:
+
+- **Portal Conditions**: Fine-grained portal access control
+- **Workshop Conditions**: Workshop-specific permission logic
+- **Decision Factories**: Programmatic permission decision creation
+
 
 ## Technical Details
 
@@ -56,7 +96,7 @@ Utilizes shared types from the common package:
 ### Security
 - Secure credential management
 - Token-based authentication
-- Permission-based access control
+- Resource-based permission controls with conditional rules
 - Request validation
 
 ## Architecture
@@ -80,6 +120,11 @@ Utilizes shared types from the common package:
     - Token management
     - Credential storage
     - Permission checks
+
+5. **Permission Handler**
+    - Resource-based access control
+    - Conditional permission evaluation
+    - Permission rule enforcement
 
 ### Data Flow
 1. Request received from frontend

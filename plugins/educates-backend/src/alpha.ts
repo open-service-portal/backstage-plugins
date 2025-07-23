@@ -1,17 +1,15 @@
 /**
- * The Educates backend plugin provides API endpoints for managing Educates workshops.
- *
- * @packageDocumentation
+ * Alpha exports for the Educates backend plugin
+ * 
+ * @alpha
  */
-
-export { educatesPlugin as default } from './plugin';
-export { educatesPlugin } from './plugin';
 export {
   educatesPortalConditions,
   educatesWorkshopConditions,
   createEducatesPortalConditionalDecision,
   createEducatesWorkshopConditionalDecision,
 } from './conditions';
+
 export {
   educatesPortalPermissionResourceRef,
   educatesWorkshopPermissionResourceRef,

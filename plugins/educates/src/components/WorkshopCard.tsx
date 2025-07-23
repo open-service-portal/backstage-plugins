@@ -10,8 +10,12 @@ import {
   makeStyles,
   Tooltip,
 } from '@material-ui/core';
-import { Workshop } from '@terasky/backstage-plugin-educates-common';
+import { 
+  Workshop, 
+  workshopStartPermission 
+} from '@terasky/backstage-plugin-educates-common';
 import { Progress } from '@backstage/core-components';
+import { usePermission } from '@backstage/plugin-permission-react';
 import OpenInNewIcon from '@material-ui/icons/OpenInNew';
 import BusinessIcon from '@material-ui/icons/Business';
 import AccessTimeIcon from '@material-ui/icons/AccessTime';
@@ -62,18 +66,27 @@ const useStyles = makeStyles(theme => ({
 
 interface WorkshopCardProps {
   workshop: Workshop;
+  portalName: string;
   onStartWorkshop: () => void;
-  canStart: boolean;
+  enablePermissions: boolean;
 }
 
-export const WorkshopCard = ({ workshop, onStartWorkshop, canStart }: WorkshopCardProps) => {
+export const WorkshopCard = ({ workshop, portalName, onStartWorkshop, enablePermissions }: WorkshopCardProps) => {
   const classes = useStyles();
   const available = workshop.environment.capacity - workshop.environment.allocated;
   const hasCapacity = available > 0;
 
+  // Check permission to start this specific workshop
+  const { allowed: canStart, loading: permissionLoading } = usePermission({
+    permission: workshopStartPermission,
+    resourceRef: `${portalName}:${workshop.name}`,
+  });
+
+  const canStartWorkshop = enablePermissions ? canStart : true;
+
   const getStartButtonTooltip = () => {
-    if (!canStart) {
-      return 'You do not have permission to start workshop sessions';
+    if (enablePermissions && !canStart) {
+      return 'You do not have permission to start this workshop';
     }
     if (!hasCapacity) {
       return 'No available capacity for this workshop';
@@ -81,12 +94,25 @@ export const WorkshopCard = ({ workshop, onStartWorkshop, canStart }: WorkshopCa
     return '';
   };
 
+  if (permissionLoading) {
+    return (
+      <Card className={classes.root}>
+        <CardContent>
+          <Progress />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className={classes.root}>
       <CardHeader
         title={workshop.title}
         subheader={
           <>
+            <Typography variant="body2" color="textSecondary" className={classes.description}>  
+              {workshop.name}
+            </Typography>
             <Box className={`${classes.chipContainer} ${classes.infoChips}`}>
               {workshop.vendor && (
                 <Chip
@@ -144,7 +170,7 @@ export const WorkshopCard = ({ workshop, onStartWorkshop, canStart }: WorkshopCa
             <Button
               color="primary"
               variant="contained"
-              disabled={!hasCapacity || !canStart}
+              disabled={!hasCapacity || !canStartWorkshop}
               onClick={onStartWorkshop}
               className={classes.startButton}
               endIcon={<OpenInNewIcon />}

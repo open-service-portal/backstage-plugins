@@ -1,19 +1,25 @@
 import express from 'express';
 import Router from 'express-promise-router';
 import { Config } from '@backstage/config';
-import { LoggerService, PermissionsService } from '@backstage/backend-plugin-api';
+import { LoggerService, PermissionsService, HttpAuthService } from '@backstage/backend-plugin-api';
+import { AuthorizeResult } from '@backstage/plugin-permission-common';
+import { 
+  portalViewPermission,
+  workshopStartPermission 
+} from '@terasky/backstage-plugin-educates-common';
 import fetch from 'node-fetch';
 
 export interface RouterOptions {
   logger: LoggerService;
   config: Config;
   permissions: PermissionsService;
+  httpAuth: HttpAuthService;
 }
 
 export async function createRouter(
   options: RouterOptions,
 ): Promise<express.Router> {
-  const { logger, config } = options;
+  const { logger, config, permissions, httpAuth } = options;
   const router = Router();
   router.use(express.json());
   
@@ -59,6 +65,18 @@ export async function createRouter(
     }
 
     try {
+      // Check permission to view this specific portal
+      const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+      const decision = await permissions.authorize(
+        [{ permission: portalViewPermission, resourceRef: portalName }],
+        { credentials }
+      );
+
+      if (decision[0].result !== AuthorizeResult.ALLOW) {
+        res.status(403).json({ error: 'Access denied to this training portal' });
+        return;
+      }
+
       // Get access token
       const tokenData = await getAccessToken(portal);
       const accessToken = tokenData.access_token;
@@ -91,6 +109,19 @@ export async function createRouter(
     }
 
     try {
+      // Check permission to view this specific portal
+      const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+      const decision = await permissions.authorize(
+        [{ permission: portalViewPermission, resourceRef: portalName }],
+        { credentials }
+      );
+
+      if (decision[0].result !== AuthorizeResult.ALLOW) {
+        res.status(403).json({ error: 'Access denied to this training portal' });
+        return;
+      }
+
+      // Get access token
       const tokenData = await getAccessToken(portal);
       res.json(tokenData);
     } catch (err) {
@@ -99,8 +130,8 @@ export async function createRouter(
     }
   });
 
-  router.post('/workshops/:portalName/:workshopName/request', async (req, res) => {
-    const { portalName, workshopName } = req.params;
+  router.post('/workshops/:portalName/:workshopEnvName/request', async (req, res) => {
+    const { portalName, workshopEnvName } = req.params;
     const portal = trainingPortals.find(p => p.name === portalName);
     if (!portal) {
       res.status(404).json({ error: 'Training portal not found' });
@@ -108,33 +139,36 @@ export async function createRouter(
     }
 
     try {
+      // Check permission to start this specific workshop
+      const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+      const decision = await permissions.authorize(
+        [{ permission: workshopStartPermission, resourceRef: `${portalName}:${workshopEnvName}` }],
+        { credentials }
+      );
+
+      if (decision[0].result !== AuthorizeResult.ALLOW) {
+        res.status(403).json({ error: 'Access denied to start this workshop' });
+        return;
+      }
+
       // Get access token
       const tokenData = await getAccessToken(portal);
       const accessToken = tokenData.access_token;
 
-      // Get the app base URL from config
-      const appBaseUrl = config.getString('app.baseUrl');
-      const indexUrl = `${appBaseUrl}/educates`;
-
-      // Request the workshop session
-      const sessionResponse = await fetch(`${portal.url}/workshops/environment/${workshopName}/request/?index_url=${encodeURIComponent(indexUrl)}`, {
+      // Request workshop session
+      const sessionResponse = await fetch(`${portal.url}/workshops/catalog/${workshopEnvName}/request/`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${accessToken}`,
         },
       });
 
       if (!sessionResponse.ok) {
-        throw new Error(`Failed to request workshop: ${sessionResponse.statusText}`);
+        throw new Error(`Failed to request workshop session: ${sessionResponse.statusText}`);
       }
 
       const sessionData = await sessionResponse.json();
-      // Add the portal URL to the response
-      res.json({
-        ...sessionData,
-        url: `${portal.url}${sessionData.url}`,
-      });
+      res.json(sessionData);
     } catch (err) {
       logger.error(`Failed to request workshop: ${err}`);
       res.status(500).json({ error: 'Failed to request workshop' });
