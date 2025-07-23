@@ -2199,6 +2199,9 @@ export class KubernetesEntityProvider implements EntityProvider {
         dependsOn: annotations[`${prefix}/dependsOn`]?.split(','),
         providesApis: annotations[`${prefix}/providesApis`]?.split(','),
         consumesApis: annotations[`${prefix}/consumesApis`]?.split(','),
+        ...(annotations[`${prefix}/subcomponent-of`] && {
+          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
+        }),
       },
     };
 
@@ -2373,6 +2376,9 @@ export class KubernetesEntityProvider implements EntityProvider {
         owner: annotations[`${prefix}/owner`] ? `${referencesNamespaceModel}/${annotations[`${prefix}/owner`]}` : `${referencesNamespaceValue}/kubernetes-auto-ingested`,
         system: annotations[`${prefix}/system`] || `${referencesNamespaceValue}/${systemValue}`,
         consumesApis: [`${referencesNamespaceValue}/${claim.kind}-${claim.apiVersion.split('/').join('--')}`],
+        ...(annotations[`${prefix}/subcomponent-of`] && {
+          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
+        }),
       },
     };
 
@@ -2509,6 +2515,9 @@ export class KubernetesEntityProvider implements EntityProvider {
         owner: annotations[`${prefix}/owner`] || 'kubernetes-auto-ingested',
         system: annotations[`${prefix}/system`] || `${referencesNamespaceValue}/${systemValue}`,
         consumesApis: [`${referencesNamespaceValue}/${xr.kind}-${xr.apiVersion.split('/').join('--')}`],
+        ...(annotations[`${prefix}/subcomponent-of`] && {
+          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
+        }),
       },
     };
     // Log the full composite entity YAML for debugging
