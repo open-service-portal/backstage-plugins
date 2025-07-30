@@ -171,14 +171,97 @@ const resourcePage = (
   </EntitySwitch>
 );
 
-// Update the entityPage constant to include the resource page
+// CCI Component Pages (New in latest version)
+const cciNamespacePage = (
+  <EntityLayout>
+    <EntityLayout.Route path="/" title="Overview">
+      <Grid container spacing={3} alignItems="stretch">
+        <Grid item md={6}>
+          <VCFAutomationCCINamespaceOverview />
+        </Grid>
+      </Grid>
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/details" title="Details">
+      <VCFAutomationCCINamespaceDetails />
+    </EntityLayout.Route>
+  </EntityLayout>
+);
+
+const cciResourcePage = (
+  <EntityLayout>
+    <EntityLayout.Route path="/" title="Overview">
+      <Grid container spacing={3} alignItems="stretch">
+        <Grid item md={6}>
+          <VCFAutomationCCIResourceOverview />
+        </Grid>
+      </Grid>
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/details" title="Details">
+      <VCFAutomationCCIResourceDetails />
+    </EntityLayout.Route>
+  </EntityLayout>
+);
+
+// Component Page with CCI Support
+const componentPage = (
+  <EntitySwitch>
+    <EntitySwitch.Case if={isComponentType('CCI.Supervisor.Namespace')}>
+      {cciNamespacePage}
+    </EntitySwitch.Case>
+    <EntitySwitch.Case if={isComponentType('CCI.Supervisor.Resource')}>
+      {cciResourcePage}
+    </EntitySwitch.Case>
+    <EntitySwitch.Case if={hasVcfAutomationVSphereVMType}>
+      {vcfAutomationVSphereVMPage}
+    </EntitySwitch.Case>
+    <EntitySwitch.Case>
+      {defaultEntityPage}
+    </EntitySwitch.Case>
+  </EntitySwitch>
+);
+
+// Update the entityPage constant to include all pages
 export const entityPage = (
   <EntitySwitch>
+    <EntitySwitch.Case if={isKind('component')} children={componentPage} />
     <EntitySwitch.Case if={isKind('resource')} children={resourcePage} />
+    <EntitySwitch.Case if={isKind('domain')} children={domainPage} />
+    <EntitySwitch.Case if={isKind('system')} children={systemPage} />
     // ... other cases
   </EntitySwitch>
 );
 ```
+
+### CCI Component Type Checks
+
+Add the following helper functions for CCI component type checking:
+
+```typescript
+import { Entity } from '@backstage/catalog-model';
+
+export const isComponentType = (type: string) => (entity: Entity) =>
+  entity?.kind === 'Component' && entity.spec?.type === type;
+```
+
+## Available Components Summary
+
+The VCF Automation frontend plugin now provides the following components:
+
+### Traditional Components
+- `VCFAutomationDeploymentOverview` & `VCFAutomationDeploymentDetails` - For VCF deployments
+- `VCFAutomationVSphereVMOverview` & `VCFAutomationVSphereVMDetails` - For vSphere VMs
+- `VCFAutomationGenericResourceOverview` & `VCFAutomationGenericResourceDetails` - For generic resources
+- `VCFAutomationProjectOverview` & `VCFAutomationProjectDetails` - For VCF projects
+
+### CCI Components (New)
+- `VCFAutomationCCINamespaceOverview` & `VCFAutomationCCINamespaceDetails` - For CCI Supervisor Namespaces
+- `VCFAutomationCCIResourceOverview` & `VCFAutomationCCIResourceDetails` - For CCI Supervisor Resources
+
+### Entity Type Mappings
+- **CCI.Supervisor.Namespace** → Uses CCI Namespace components
+- **CCI.Supervisor.Resource** → Uses CCI Resource components  
+- **Cloud.vSphere.Machine** → Uses vSphere VM components
+- **Other types** → Uses generic resource components
 
 ## What's Next?
 

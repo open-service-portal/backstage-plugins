@@ -1,16 +1,19 @@
 # VCF Automation Plugins
 
 The VCF Automation plugins provide comprehensive visibility and management capabilities for VMware Cloud Foundation (VCF) deployments within Backstage. It enables teams to monitor deployments, manage resources, and oversee project configurations through an intuitive interface.
-The plugins support Aria Automation 8.x as well as VCF Automation 9.x.
+The plugins support Aria Automation 8.x as well as VCF Automation 9.x, including both vm-apps (classic) and all-apps organization types.
 
 ## Features
 
 - **Deployment Monitoring**: Track VCF deployment status and operations
-- **Resource Management**: Manage vSphere VMs and other VCF resources
-- **Project Configuration**: Configure and monitor VCF projects
+- **Resource Management**: Manage vSphere VMs and other VCF resources including CCI Supervisor resources
+- **Project Configuration**: Configure and monitor VCF projects across different organization types
+- **CCI Support**: Full support for Cloud Consuption Interface (CCI) Supervisor namespaces and resources
+- **Multi-Organization Type**: Support for both vm-apps (classic) and all-apps organization models in VCF 9
 - **Permission Controls**: Fine-grained access control integration
-- **Entity Integration**: Seamless catalog entity synchronization
-- **Status Tracking**: Real-time deployment and resource status
+- **Entity Integration**: Seamless catalog entity synchronization with proper entity relationships
+- **Status Tracking**: Real-time deployment and resource status with live Kubernetes object monitoring
+- **YAML Visualization**: Beautiful syntax-highlighted YAML rendering for Kubernetes manifests
 
 ## Plugin Components
 
@@ -56,8 +59,33 @@ The plugin provides a backend that:
 - `VCFAutomationGenericResourceDetails`: Resource configuration
 
 ### Project Components
-- `VCFAutomationProjectOverview`: Project status overview
-- `VCFAutomationProjectDetails`: Project configuration details
+- `VCFAutomationProjectOverview`: Project status overview (supports both vm-apps and all-apps)
+- `VCFAutomationProjectDetails`: Project configuration details (supports both vm-apps and all-apps)
+
+### CCI Components (New)
+- `VCFAutomationCCINamespaceOverview`: CCI Supervisor Namespace overview with VM classes, storage classes, and zones
+- `VCFAutomationCCINamespaceDetails`: Detailed CCI Supervisor Namespace information with status tables
+- `VCFAutomationCCIResourceOverview`: CCI Supervisor Resource overview with manifest and object data
+- `VCFAutomationCCIResourceDetails`: Detailed CCI Supervisor Resource with tabbed views and YAML rendering
+
+### Entity Types Created
+
+The ingestor creates the following Backstage entity types:
+
+- **Domain**: VCF Projects (with project-specific external links)
+- **System**: VCF Deployments (with deployment-specific external links)
+- **Component**: 
+  - vSphere Virtual Machines (Cloud.vSphere.Machine)
+  - CCI Supervisor Namespaces (CCI.Supervisor.Namespace)
+  - CCI Supervisor Resources (CCI.Supervisor.Resource)
+- **Resource**: Other VCF resources (generic resources)
+
+### Entity Relationships
+
+- **CCI Supervisor Resources** are marked as `subcomponentOf` their parent CCI Supervisor Namespace
+- **Deployments** belong to their parent Project domain
+- **Resources** are part of their parent Deployment system
+- **Dependencies** are properly tracked between resources using `dependsOn` relationships
 
 
 ## Prerequisites
