@@ -299,4 +299,28 @@ export class VcfAutomationService {
       return { error: 'Service temporarily unavailable', status: 'error' };
     }
   }
+
+  async getSupervisorResources(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/supervisor-resources`, instanceName);
+    } catch (error) {
+      this.logger.error('Failed to get supervisor resources', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorResource(resourceId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/supervisor-resources/${resourceId}`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor resource ${resourceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
 } 

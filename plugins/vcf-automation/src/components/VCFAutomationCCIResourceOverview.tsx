@@ -50,6 +50,9 @@ export const VCFAutomationCCIResourceOverview = () => {
   const resourceId = entity.metadata.name;
   const instanceName = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-instance'];
 
+  // Check if this is a standalone resource
+  const isStandalone = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'] === 'STANDALONE';
+
   // Parse annotation data once using useMemo
   const annotationData = useMemo(() => {
     const resourceProperties = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'];
@@ -75,31 +78,67 @@ export const VCFAutomationCCIResourceOverview = () => {
 
   // Fallback API call if annotation data is missing or empty
   const { value: apiResourceData, loading, error } = useAsync(async () => {
-    if (!needsApiCall || !deploymentId || !resourceId) {
+    if (!needsApiCall || !resourceId) {
       return null;
     }
 
     try {
-      // Fetch detailed resource data from the backend
-      const response = await api.getDeploymentResources(deploymentId, instanceName);
-      let resources = null;
-      if (response) {
-        // Handle both direct array and paginated response with content wrapper
-        if (Array.isArray(response)) {
-          resources = response;
-        } else if (response.content && Array.isArray(response.content)) {
-          resources = response.content;
+      if (isStandalone) {
+        // For standalone resources, fetch directly by resource ID
+        const response = await api.getSupervisorResource(resourceId, instanceName);
+        if (response) {
+          // Transform standalone resource data to match expected structure
+          return {
+            id: response.id,
+            properties: {
+              manifest: {
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                metadata: response.metadata,
+                spec: response.spec,
+              },
+              object: {
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                metadata: response.metadata,
+                spec: response.spec,
+                status: response.status,
+              },
+              context: JSON.stringify({
+                namespace: response.metadata.namespace,
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                standalone: true,
+              }),
+            },
+          };
         }
-      }
-      if (resources) {
-        return resources.find((r: any) => r.id === resourceId);
+      } else {
+        // For deployment-managed resources, use existing logic
+        if (!deploymentId) {
+          return null;
+        }
+        
+        const response = await api.getDeploymentResources(deploymentId, instanceName);
+        let resources = null;
+        if (response) {
+          // Handle both direct array and paginated response with content wrapper
+          if (Array.isArray(response)) {
+            resources = response;
+          } else if (response.content && Array.isArray(response.content)) {
+            resources = response.content;
+          }
+        }
+        if (resources) {
+          return resources.find((r: any) => r.id === resourceId);
+        }
       }
       return null;
     } catch (apiError) {
       console.error('Failed to fetch resource data:', apiError);
       return null;
     }
-  }, [needsApiCall, deploymentId, resourceId, instanceName]);
+  }, [needsApiCall, isStandalone, deploymentId, resourceId, instanceName]);
 
   // Determine final data to use
   const resourceData = annotationData.resourceData || apiResourceData;
@@ -210,6 +249,18 @@ export const VCFAutomationCCIResourceOverview = () => {
   return (
     <InfoCard title="CCI Supervisor Resource Overview">
       <Grid container spacing={3}>
+        {isStandalone && (
+          <Grid item xs={12}>
+            <Box mb={2}>
+              <Chip
+                label="Standalone Resource"
+                color="secondary"
+                variant="outlined"
+                size="small"
+              />
+            </Box>
+          </Grid>
+        )}
         <Grid item xs={12}>
           <Typography variant="h6" className={classes.sectionTitle}>
             Basic Information

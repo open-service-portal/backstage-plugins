@@ -129,6 +129,8 @@ export interface VcfAutomationApi {
   getProjects(instanceName?: string): Promise<any>;
   getDeployments(instanceName?: string): Promise<any>;
   getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any>;
+  getSupervisorResources(instanceName?: string): Promise<any>;
+  getSupervisorResource(resourceId: string, instanceName?: string): Promise<any>;
 }
 
 export const vcfAutomationApiRef = createApiRef<VcfAutomationApi>({
@@ -274,7 +276,7 @@ export class VcfAutomationClient implements VcfAutomationApi {
   async getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any> {
     const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
     const headers = await this.getAuthHeaders();
-    const url = instanceName 
+        const url = instanceName
       ? `${baseUrl}/deployments/${deploymentId}/resources?instance=${encodeURIComponent(instanceName)}`
       : `${baseUrl}/deployments/${deploymentId}/resources`;
     const response = await fetch(url, {
@@ -282,6 +284,38 @@ export class VcfAutomationClient implements VcfAutomationApi {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch deployment resources: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorResources(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-resources?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-resources`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor resources: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorResource(resourceId: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-resources/${resourceId}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-resources/${resourceId}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor resource: ${response.statusText}`);
     }
     return await response.json();
   }

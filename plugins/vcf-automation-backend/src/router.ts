@@ -76,5 +76,18 @@ export async function createRouter(
     res.json(resources);
   });
 
+  router.get('/supervisor-resources', async (req, res) => {
+    const instanceName = req.query.instance as string | undefined;
+    const resources = await vcfService.getSupervisorResources(instanceName);
+    res.json(resources);
+  });
+
+  router.get('/supervisor-resources/:resourceId', async (req, res) => {
+    const { resourceId } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    const resource = await vcfService.getSupervisorResource(resourceId, instanceName);
+    res.json(resource);
+  });
+
   return router;
 }

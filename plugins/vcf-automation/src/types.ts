@@ -236,4 +236,26 @@ export interface CciSupervisorResource {
   origin: string;
   dependsOn: string[];
   state: string;
+}
+
+export interface StandaloneSupervisorResource {
+  id: string;
+  orgId: string;
+  project: {
+    id: string;
+    name: string;
+  };
+  apiVersion: string;
+  kind: string;
+  metadata: {
+    name: string;
+    namespace: string;
+    labels?: { [key: string]: string };
+    annotations?: { [key: string]: string };
+    creationTimestamp: string;
+    uid: string;
+    resourceVersion: string;
+  };
+  spec: any;
+  status: any;
 } 

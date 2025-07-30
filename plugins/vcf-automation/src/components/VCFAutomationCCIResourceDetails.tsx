@@ -1,4 +1,7 @@
+import { useState, useMemo } from 'react';
 import { useEntity } from '@backstage/plugin-catalog-react';
+import { useApi } from '@backstage/core-plugin-api';
+import { useAsync } from 'react-use';
 import {
   InfoCard,
   StructuredMetadataTable,
@@ -24,8 +27,8 @@ import {
 } from '@material-ui/core';
 import { makeStyles } from '@material-ui/core/styles';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
-import yaml from 'js-yaml';
-import { useState } from 'react';
+import * as yaml from 'js-yaml';
+import { vcfAutomationApiRef } from '../api';
 
 const useStyles = makeStyles(theme => ({
   statusChip: {
@@ -95,25 +98,146 @@ export const VCFAutomationCCIResourceDetails = () => {
   const classes = useStyles();
   const { entity } = useEntity();
   const [tabValue, setTabValue] = useState(0);
+  const api = useApi(vcfAutomationApiRef);
 
-  const resourceProperties = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'];
-  const resourceManifest = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-manifest'];
-  const resourceObject = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-object'];
-  const resourceContext = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-context'];
-  const resourceState = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-state'];
-  const syncStatus = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-sync-status'];
-  const createdAt = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-created-at'];
-  const origin = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'];
+  // Extract stable values from entity
+  const deploymentId = entity.spec?.system as string;
+  const resourceId = entity.metadata.name;
+  const instanceName = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-instance'];
+  
+  // Check if this is a standalone resource
+  const isStandalone = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'] === 'STANDALONE';
 
-  const resourceData = resourceProperties ? JSON.parse(resourceProperties) : null;
-  const manifest = resourceManifest ? JSON.parse(resourceManifest) : null;
-  const objectData = resourceObject ? JSON.parse(resourceObject) : null;
+  // Parse annotation data once using useMemo
+  const annotationData = useMemo(() => {
+    const resourceProperties = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'];
+    const resourceManifest = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-manifest'];
+    const resourceObject = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-object'];
+    const resourceContext = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-context'];
+    const resourceState = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-state'];
+    const syncStatus = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-sync-status'];
+    const createdAt = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-created-at'];
+    const origin = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'];
+    
+    return {
+      resourceData: resourceProperties && resourceProperties !== '{}' ? JSON.parse(resourceProperties) : null,
+      manifest: resourceManifest && resourceManifest !== '{}' ? JSON.parse(resourceManifest) : null,
+      objectData: resourceObject && resourceObject !== '{}' ? JSON.parse(resourceObject) : null,
+      resourceContext: resourceContext || '',
+      resourceState,
+      syncStatus,
+      createdAt,
+      origin,
+    };
+  }, [
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-manifest'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-object'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-resource-context'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-state'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-sync-status'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-created-at'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'],
+  ]);
+
+  // Check if we need to make API call
+  const needsApiCall = !annotationData.resourceData || !annotationData.manifest || !annotationData.objectData;
+
+  // Fallback API call if annotation data is missing or empty
+  const { value: apiResourceData, loading, error } = useAsync(async () => {
+    if (!needsApiCall || !resourceId) {
+      return null;
+    }
+
+    try {
+      if (isStandalone) {
+        // For standalone resources, fetch directly by resource ID
+        const response = await api.getSupervisorResource(resourceId, instanceName);
+        if (response) {
+          // Transform standalone resource data to match expected structure
+          return {
+            id: response.id,
+            properties: {
+              manifest: {
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                metadata: response.metadata,
+                spec: response.spec,
+              },
+              object: {
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                metadata: response.metadata,
+                spec: response.spec,
+                status: response.status,
+              },
+              context: JSON.stringify({
+                namespace: response.metadata.namespace,
+                apiVersion: response.apiVersion,
+                kind: response.kind,
+                standalone: true,
+              }),
+            },
+          };
+        }
+      } else {
+        // For deployment-managed resources, use existing logic
+        if (!deploymentId) {
+          return null;
+        }
+        
+        const response = await api.getDeploymentResources(deploymentId, instanceName);
+        let resources = null;
+        if (response) {
+          // Handle both direct array and paginated response with content wrapper
+          if (Array.isArray(response)) {
+            resources = response;
+          } else if (response.content && Array.isArray(response.content)) {
+            resources = response.content;
+          }
+        }
+        if (resources) {
+          return resources.find((r: any) => r.id === resourceId);
+        }
+      }
+      return null;
+    } catch (apiError) {
+      console.error('Failed to fetch resource data:', apiError);
+      return null;
+    }
+  }, [needsApiCall, isStandalone, deploymentId, resourceId, instanceName]);
+
+  // Determine final data to use
+  const resourceData = annotationData.resourceData || apiResourceData;
+  const manifest = annotationData.manifest || apiResourceData?.properties?.manifest;
+  const objectData = annotationData.objectData || apiResourceData?.properties?.object;
+  const resourceContext = annotationData.resourceContext || apiResourceData?.properties?.context;
+  const resourceState = annotationData.resourceState;
+  const syncStatus = annotationData.syncStatus;
+  const createdAt = annotationData.createdAt;
+  const origin = annotationData.origin;
 
   const handleTabChange = (_event: React.ChangeEvent<{}>, newValue: number) => {
     setTabValue(newValue);
   };
 
-  if (!resourceData) {
+  if (loading) {
+    return (
+      <InfoCard title="CCI Supervisor Resource Details">
+        <Typography>Loading resource details...</Typography>
+      </InfoCard>
+    );
+  }
+
+  if (error) {
+    return (
+      <InfoCard title="CCI Supervisor Resource Details">
+        <Typography color="error">Error loading resource details: {error.message}</Typography>
+      </InfoCard>
+    );
+  }
+
+  if (!resourceData && !manifest && !objectData) {
     return (
       <InfoCard title="CCI Supervisor Resource Details">
         <Typography>No resource data available.</Typography>
