@@ -77,11 +77,16 @@ The ingestor creates different Backstage entity types based on the VCF resource 
 - Supports both vm-apps and all-apps project structures
 - External links point to project-filtered deployment views
 
-### System Entities (Deployments)  
+### System Entities (Deployments & Standalone Resources)  
 - **VCF Deployments** → **Backstage System**
-- Contains deployment metadata (status, cost, ownership, etc.)
-- External links point to specific deployment views
-- Part of parent Project domain
+  - Contains deployment metadata (status, cost, ownership, etc.)
+  - External links point to specific deployment views
+  - Part of parent Project domain
+- **Standalone Resources Container** → **Backstage System** (for all-apps only)
+  - Named `{project-name}-standalone-resources` with ID `{project-id}-standalone-resources`
+  - Created only when a project has standalone supervisor resources
+  - Contains all standalone CCI supervisor resources for that project
+  - Part of parent Project domain
 
 ### Component Entities
 - **Cloud.vSphere.Machine** → **Backstage Component** (type: `Cloud.vSphere.Machine`)
@@ -109,16 +114,24 @@ For **all-apps** organization types, the ingestor provides enhanced support for 
 
 ### CCI.Supervisor.Resource  
 - Created as **Component** entities
-- Marked as `subcomponentOf` their parent CCI.Supervisor.Namespace
+- **Deployment-managed**: Marked as `subcomponentOf` their parent CCI.Supervisor.Namespace
+- **Standalone**: Part of `{project-id}-standalone-resources` system
 - Contains complete Kubernetes resource data:
   - **Manifest**: Original resource template/specification
   - **Object**: Live Kubernetes object with current status
   - **Context**: CCI context information
   - **Dependencies**: Tracked via `dependsOn` relationships
+- **Smart External Links**: Based on resource kind:
+  - **VirtualMachine**: Links to VM service view
+  - **Service**: Links to network service view  
+  - **Cluster**: Links to TKG service view
+  - **Other types**: No external link (still ingested)
+- **Smart Tagging**: All CCI resources from all-apps organizations get tagged with `kind:<RESOURCE_KIND>` (e.g., `kind:virtualmachine`, `kind:service`, `kind:cluster`)
 - Annotations include:
   - `terasky.backstage.io/vcf-automation-cci-resource-manifest` (JSON)
   - `terasky.backstage.io/vcf-automation-cci-resource-object` (JSON)
   - `terasky.backstage.io/vcf-automation-cci-resource-context`
+  - `terasky.backstage.io/vcf-automation-resource-origin` ('DEPLOYED' or 'STANDALONE')
 
 ### API Endpoint Usage
 
