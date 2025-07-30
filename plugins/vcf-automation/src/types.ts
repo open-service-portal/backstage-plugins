@@ -136,25 +136,104 @@ export interface VcfProjectZone {
 }
 
 export interface VcfProject {
-  machineNamingTemplate: string;
-  administrators: Array<{ email: string; type: string; }>;
-  members: Array<{ email: string; type: string; }>;
-  viewers: Array<{ email: string; type: string; }>;
-  supervisors: Array<{ email: string; type: string; }>;
-  zones: VcfProjectZone[];
-  constraints: Record<string, unknown>;
-  operationTimeout: number;
-  sharedResources: boolean;
-  placementPolicy: string;
-  customProperties: Record<string, unknown>;
+  // Common properties (present in both vm-apps and all-apps)
   name: string;
   description: string;
   id: string;
-  organizationId: string;
-  orgId: string;
-  _links: {
+  operationTimeout: number;
+  administrators: Array<{ email: string; type: string; }> | any[]; // Can be empty array in all-apps
+  
+  // vm-apps specific properties (optional)
+  machineNamingTemplate?: string;
+  members?: Array<{ email: string; type: string; }>;
+  viewers?: Array<{ email: string; type: string; }>;
+  supervisors?: Array<{ email: string; type: string; }>;
+  zones?: VcfProjectZone[];
+  constraints?: Record<string, unknown>;
+  sharedResources?: boolean;
+  placementPolicy?: string;
+  customProperties?: Record<string, unknown>;
+  organizationId?: string;
+  _links?: {
     self: {
       href: string;
     };
   };
+  
+  // all-apps specific properties (optional)
+  orgId?: string;
+  users?: any[];
+  auditors?: any[];
+  advancedUsers?: any[];
+  properties?: Record<string, unknown>;
+}
+
+export interface CciSupervisorNamespace {
+  id: string;
+  name: string;
+  type: 'CCI.Supervisor.Namespace';
+  properties: {
+    metadata: {
+      'infrastructure.cci.vmware.com/id': string;
+      'infrastructure.cci.vmware.com/project-id': string;
+    };
+    existing: boolean;
+    name: string;
+    id: string;
+    resourceLink: string;
+    status: {
+      conditions: Array<{
+        lastTransitionTime: string;
+        status: string;
+        type: string;
+      }>;
+      namespaceEndpointURL: string;
+      phase: string;
+      storageClasses: Array<{
+        limit: string;
+        name: string;
+      }>;
+      vmClasses: Array<{
+        name: string;
+      }>;
+      zones: Array<{
+        cpuLimit: string;
+        cpuReservation: string;
+        memoryLimit: string;
+        memoryReservation: string;
+        name: string;
+      }>;
+    };
+  };
+  createdAt: string;
+  syncStatus: string;
+  origin: string;
+  state: string;
+}
+
+export interface CciSupervisorResource {
+  id: string;
+  name: string;
+  type: 'CCI.Supervisor.Resource';
+  properties: {
+    wait?: {
+      conditions: Array<{
+        type: string;
+        status: string;
+      }>;
+    };
+    manifest: any; // Kubernetes manifest - can be any structure
+    count?: number;
+    existing: boolean;
+    countIndex?: number;
+    context: string;
+    id: string;
+    resourceLink: string;
+    object: any; // The actual Kubernetes object
+  };
+  createdAt: string;
+  syncStatus: string;
+  origin: string;
+  dependsOn: string[];
+  state: string;
 } 

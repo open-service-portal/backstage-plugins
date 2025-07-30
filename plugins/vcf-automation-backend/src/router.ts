@@ -57,5 +57,24 @@ export async function createRouter(
     res.json(deployment);
   });
 
+  router.get('/projects', async (req, res) => {
+    const instanceName = req.query.instance as string | undefined;
+    const projects = await vcfService.getProjects(instanceName);
+    res.json(projects);
+  });
+
+  router.get('/deployments', async (req, res) => {
+    const instanceName = req.query.instance as string | undefined;
+    const deployments = await vcfService.getDeployments(instanceName);
+    res.json(deployments);
+  });
+
+  router.get('/deployments/:deploymentId/resources', async (req, res) => {
+    const { deploymentId } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    const resources = await vcfService.getDeploymentResources(deploymentId, instanceName);
+    res.json(resources);
+  });
+
   return router;
 }

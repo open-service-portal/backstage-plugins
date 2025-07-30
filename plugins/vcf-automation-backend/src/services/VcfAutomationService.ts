@@ -21,6 +21,7 @@ interface VcfInstance {
     domain: string;
   };
   orgName?: string;
+  organizationType?: 'vm-apps' | 'all-apps';
   token?: string;
   tokenExpiry?: Date;
 }
@@ -51,6 +52,7 @@ export class VcfAutomationService {
               domain: instanceConfig.getOptionalString('authentication.domain') ?? "",
             },
             orgName: instanceConfig.getOptionalString('orgName'),
+            organizationType: instanceConfig.getOptionalString('organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
           };
         });
       } else {
@@ -67,6 +69,7 @@ export class VcfAutomationService {
             domain: auth.getString('domain'),
           },
           orgName: config.getOptionalString('vcfAutomation.orgName'),
+          organizationType: config.getOptionalString('vcfAutomation.organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
         }];
       }
     } catch (error) {
@@ -234,10 +237,63 @@ export class VcfAutomationService {
   }
 
   async getProjectDetails(projectId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    const instance = instanceName 
+      ? this.instances.find(i => i.name === instanceName) ?? this.defaultInstance
+      : this.defaultInstance;
+
     try {
-      return await this.makeAuthorizedRequest(`/iaas/api/projects/${projectId}`, instanceName);
+      // Use different API endpoints based on organization type
+      const apiPath = instance.organizationType === 'all-apps' 
+        ? `/project-service/api/projects/${projectId}`
+        : `/iaas/api/projects/${projectId}`;
+      
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
     } catch (error) {
       this.logger.error(`Failed to get project details for ${projectId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getProjects(instanceName?: string): Promise<any | VcfErrorResponse> {
+    const instance = instanceName 
+      ? this.instances.find(i => i.name === instanceName) ?? this.defaultInstance
+      : this.defaultInstance;
+
+    try {
+      // Use different API endpoints based on organization type
+      const apiPath = instance.organizationType === 'all-apps' 
+        ? `/project-service/api/projects`
+        : `/iaas/api/projects`;
+      
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get projects list`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getDeployments(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // Deployment API endpoint is the same for both organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/deployments`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get deployments list`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // Resources API endpoint is the same for both organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/deployments/${deploymentId}/resources`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get resources for deployment ${deploymentId}`, {
         error: error instanceof Error ? error.message : String(error),
       });
       return { error: 'Service temporarily unavailable', status: 'error' };

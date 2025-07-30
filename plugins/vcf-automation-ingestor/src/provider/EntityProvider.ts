@@ -96,6 +96,7 @@ interface VcfInstance {
     domain: string;
   };
   orgName?: string;
+  organizationType?: 'vm-apps' | 'all-apps';
   token?: string;
   tokenExpiry?: Date;
 }
@@ -132,6 +133,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
               domain: instanceConfig.getOptionalString('authentication.domain') ?? "",
             },
             orgName: instanceConfig.getOptionalString('orgName'),
+            organizationType: instanceConfig.getOptionalString('organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
           };
         });
       } else {
@@ -147,6 +149,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
             domain: config.getOptionalString('vcfAutomation.authentication.domain') ?? "",
           },
           orgName: config.getOptionalString('vcfAutomation.orgName'),
+          organizationType: config.getOptionalString('vcfAutomation.organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
         }];
       }
     } catch (error) {
@@ -333,7 +336,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
         try {
           const deployments = await this.fetchDeployments(instance);
           this.logger.debug(`Transforming ${deployments.length} deployments into entities for instance ${instance.name}`);
-          const entities = this.transformToEntities(deployments, instance);
+          const entities = await this.transformToEntities(deployments, instance);
           allEntities.push(...entities);
         } catch (error) {
           this.logger.error(`Failed to process instance ${instance.name}`, {
@@ -360,7 +363,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
     }
   }
 
-  private transformToEntities(deployments: VcfDeployment[], instance: VcfInstance) {
+  private async transformToEntities(deployments: VcfDeployment[], instance: VcfInstance) {
     const entities: Array<SystemEntity | ComponentEntity | ResourceEntity | DomainEntity> = [];
     const domains = new Set<string>();
     const locationRef = `url:${instance.baseUrl}/vcf-automation`;
@@ -407,15 +410,27 @@ export class VcfAutomationEntityProvider implements EntityProvider {
         // Generate version-specific links for Domain entities
         const domainLinks = [];
         if (instance.majorVersion >= 9) {
-          // Version 9+ links
-          domainLinks.push({
-            url: `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${deployment.project.id}"%5D`,
-            title: 'View Project Deployments in VCF Automation',
-          });
-          domainLinks.push({
-            url: `${instance.baseUrl}/automation/#/infrastructure/projects/edit/${deployment.project.id}`,
-            title: 'Edit Project in VCF Automation',
-          });
+          // Version 9+ links - different URLs based on organization type
+          if (instance.organizationType === 'all-apps') {
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${deployment.project.id}"%5D`,
+              title: 'View Project Deployments in VCF Automation',
+            });
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/manage-and-govern/projects/edit/${deployment.project.id}/summary`,
+              title: 'Edit Project in VCF Automation',
+            });
+          } else {
+            // vm-apps (classic) organization type
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${deployment.project.id}"%5D`,
+              title: 'View Project Deployments in VCF Automation',
+            });
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/infrastructure/projects/edit/${deployment.project.id}`,
+              title: 'Edit Project in VCF Automation',
+            });
+          }
         } else {
           // Version 8 links
           domainLinks.push({
@@ -425,7 +440,9 @@ export class VcfAutomationEntityProvider implements EntityProvider {
         }
         
         const domainViewUrl = instance.majorVersion >= 9 
-          ? `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${deployment.project.id}"%5D`
+          ? (instance.organizationType === 'all-apps'
+              ? `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${deployment.project.id}"%5D`
+              : `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${deployment.project.id}"%5D`)
           : `${instance.baseUrl}/automation/#/service/catalog/consume/deployment?projects=%5B"${deployment.project.id}"%5D`;
         
         entities.push({
@@ -453,7 +470,9 @@ export class VcfAutomationEntityProvider implements EntityProvider {
 
       // Create System entity for the deployment
       const systemViewUrl = instance.majorVersion >= 9 
-        ? `${instance.baseUrl}/automation/#/consume/deployment/${deployment.id}`
+        ? (instance.organizationType === 'all-apps'
+            ? `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments/${deployment.id}`
+            : `${instance.baseUrl}/automation/#/consume/deployment/${deployment.id}`)
         : `${instance.baseUrl}/automation/#/service/catalog/consume/deployment/${deployment.id}`;
       
       const systemLinks = [{
@@ -495,8 +514,39 @@ export class VcfAutomationEntityProvider implements EntityProvider {
       // Get the name-to-id map for this deployment
       const nameToIdMap = deploymentResourceNameMap.get(deployment.id);
 
+      // For all-apps organization type, fetch detailed resource data
+      let detailedResources = deployment.resources;
+      if (instance.organizationType === 'all-apps') {
+        try {
+          this.logger.debug(`Fetching detailed resources for deployment ${deployment.id} (all-apps)`);
+          const resourcesResponse = await fetch(
+            `${instance.baseUrl}/deployment/api/deployments/${deployment.id}/resources`,
+            {
+              headers: {
+                Authorization: `Bearer ${instance.token}`,
+              },
+            },
+          );
+          
+          if (resourcesResponse.ok) {
+            const resourcesData = await resourcesResponse.json();
+            // Handle both direct array and paginated response with content wrapper
+            if (Array.isArray(resourcesData)) {
+              detailedResources = resourcesData;
+            } else if (resourcesData.content && Array.isArray(resourcesData.content)) {
+              detailedResources = resourcesData.content;
+            }
+            this.logger.debug(`Fetched ${detailedResources.length} detailed resources for deployment ${deployment.id}`);
+          } else {
+            this.logger.warn(`Failed to fetch detailed resources for deployment ${deployment.id}: ${resourcesResponse.status}`);
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching detailed resources for deployment ${deployment.id}:`, error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+
       // Create Component and Resource entities for each resource
-      for (const resource of deployment.resources) {
+      for (const resource of detailedResources) {
         // Log dependency resolution for debugging
         if (resource.dependsOn && resource.dependsOn.length > 0) {
           this.logger.debug(
@@ -504,9 +554,16 @@ export class VcfAutomationEntityProvider implements EntityProvider {
           );
         }
 
-        const resourceViewUrl = instance.majorVersion >= 9 
-          ? `${instance.baseUrl}/automation/#/consume/deployment/${deployment.id}`
-          : `${instance.baseUrl}/automation/#/service/catalog/consume/deployment/${deployment.id}`;
+        let resourceViewUrl: string;
+        if (instance.majorVersion >= 9) {
+          if (instance.organizationType === 'all-apps') {
+            resourceViewUrl = `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments/${deployment.id}`;
+          } else {
+            resourceViewUrl = `${instance.baseUrl}/automation/#/consume/deployment/${deployment.id}`;
+          }
+        } else {
+          resourceViewUrl = `${instance.baseUrl}/automation/#/service/catalog/consume/deployment/${deployment.id}`;
+        }
         
         const resourceLinks = [{
           url: resourceViewUrl,
@@ -521,7 +578,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
               [ANNOTATION_LOCATION]: locationRef,
               [ANNOTATION_ORIGIN_LOCATION]: locationRef,
               'terasky.backstage.io/vcf-automation-resource-type': resource.type,
-              'terasky.backstage.io/vcf-automation-resource-properties': JSON.stringify(resource.properties),
+              'terasky.backstage.io/vcf-automation-resource-properties': JSON.stringify((detailedResources.find(dr => dr.id === resource.id) || resource).properties || {}),
               'terasky.backstage.io/vcf-automation-resource-created-at': resource.createdAt,
               'terasky.backstage.io/vcf-automation-resource-origin': resource.origin,
               'terasky.backstage.io/vcf-automation-resource-sync-status': resource.syncStatus,
@@ -544,7 +601,16 @@ export class VcfAutomationEntityProvider implements EntityProvider {
                 this.logger.warn(`Failed to resolve dependency name ${depName} to ID for resource ${resource.id} (${resource.name})`);
                 return undefined;
               }
-              return getEntityRef(depId);
+              
+              // Find the dependency resource to determine its type
+              const depResource = detailedResources?.find(r => r.name === depName);
+              if (depResource && (depResource.type === 'CCI.Supervisor.Namespace' || depResource.type === 'CCI.Supervisor.Resource')) {
+                // CCI resources are created as Components
+                return `component:default/${depId.toLowerCase()}`;
+              } else {
+                // Other resources use the default entity reference
+                return getEntityRef(depId);
+              }
             }).filter((ref): ref is string => ref !== undefined) || [],
           },
         };
@@ -570,6 +636,59 @@ export class VcfAutomationEntityProvider implements EntityProvider {
             spec: {
               ...baseEntity.spec,
               lifecycle: 'production',
+            },
+          });
+        } else if (resource.type === 'CCI.Supervisor.Namespace') {
+          // CCI Supervisor Namespace becomes a Component
+          entities.push({
+            apiVersion: 'backstage.io/v1alpha1',
+            kind: 'Component',
+            ...baseEntity,
+            metadata: {
+              ...baseEntity.metadata,
+              annotations: {
+                ...baseEntity.metadata.annotations,
+                'terasky.backstage.io/vcf-automation-cci-namespace-endpoint': resource.properties?.status?.namespaceEndpointURL || '',
+                'terasky.backstage.io/vcf-automation-cci-namespace-phase': resource.properties?.status?.phase || '',
+              },
+            },
+            spec: {
+              ...baseEntity.spec,
+              lifecycle: 'production',
+            },
+          });
+        } else if (resource.type === 'CCI.Supervisor.Resource') {
+          // CCI Supervisor Resource becomes a Component and subcomponent of its namespace dependency
+          const namespaceDependency = resource.dependsOn?.find(dep => 
+            detailedResources?.find(r => r.name === dep && r.type === 'CCI.Supervisor.Namespace')
+          );
+          
+          let subcomponentOf: string = '';
+          if (namespaceDependency) {
+            const namespaceResource = detailedResources?.find(r => r.name === namespaceDependency);
+            if (namespaceResource) {
+              // CCI Supervisor Namespace resources are created as Components, so use component: reference
+              subcomponentOf = `component:default/${namespaceResource.id.toLowerCase()}`;
+            }
+          }
+          
+          entities.push({
+            apiVersion: 'backstage.io/v1alpha1',
+            kind: 'Component',
+            ...baseEntity,
+            metadata: {
+              ...baseEntity.metadata,
+              annotations: {
+                ...baseEntity.metadata.annotations,
+                'terasky.backstage.io/vcf-automation-cci-resource-context': resource.properties?.context || '',
+                'terasky.backstage.io/vcf-automation-cci-resource-manifest': JSON.stringify(resource.properties?.manifest || {}),
+                'terasky.backstage.io/vcf-automation-cci-resource-object': JSON.stringify(resource.properties?.object || {}),
+              },
+            },
+            spec: {
+              ...baseEntity.spec,
+              lifecycle: 'production',
+              subcomponentOf,
             },
           });
         } else {
