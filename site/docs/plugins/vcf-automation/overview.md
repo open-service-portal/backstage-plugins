@@ -15,6 +15,61 @@ The plugins support Aria Automation 8.x as well as VCF Automation 9.x, including
 - **Status Tracking**: Real-time deployment and resource status with live Kubernetes object monitoring
 - **YAML Visualization**: Beautiful syntax-highlighted YAML rendering for Kubernetes manifests
 
+## Screenshots
+
+### Project Overview
+![Project View](../../images/vcf-proj-overview.png)
+
+### Project Details
+![Project Details 1](../../images/vcf-proj-details-1.png)
+![Project Details 2](../../images/vcf-proj-details-2.png)
+![Project Details 3](../../images/vcf-proj-details-3.png)
+
+### Deployment Overview
+![Deployment View](../../images/vcf-deploy-overview.png)
+
+### Deployment Details
+![Deployment Details 1](../../images/vcf-deploy-details-1.png)
+![Deployment Details 2](../../images/vcf-deploy-details-2.png)
+
+### vSphere VM Overview (VCFA 8 and VM Apps orgs in VCFA 9)
+![vSphere VM View](../../images/vcf-vm-overview.png)
+
+### vSphere VM Details (VCFA 8 and VM Apps orgs in VCFA 9)
+![vSphere VM Details 1](../../images/vcf-vm-details-1.png)
+![vSphere VM Details 2](../../images/vcf-vm-details-2.png)
+
+### Resource Overview (VCFA 8 and VM Apps orgs in VCFA 9)
+![Resource View](../../images/vcf-resource-overview.png)
+
+### Resource Details (VCFA 8 and VM Apps orgs in VCFA 9)
+![Resource Details](../../images/vcf-resource-details.png)
+
+### CCI Supervisor Namespace Overview (VCFA 9 All Apps Orgs)
+![CCI Supervisor Namespace View](../../images/vcfa-cci-ns.png)
+
+### CCI Supervisor Namespace Details (VCFA 9 All Apps Orgs)
+![CCI Supervisor Namespace Details 1](../../images/vcfa-cci-ns-details-1.png)
+![CCI Supervisor Namespace Details 2](../../images/vcfa-cci-ns-details-2.png)
+
+### CCI Supervisor Resource Overview (VCFA 9 All Apps Orgs)
+![CCI Supervisor Resource View 1](../../images/vcfa-cci-resource-1.png)
+![CCI Supervisor Resource View 2](../../images/vcfa-cci-resource-2.png)
+
+### CCI Supervisor Resource Details (VCFA 9 All Apps Orgs)
+#### Basic Information
+![CCI Supervisor Resource Details 1](../../images/vcfa-cci-resource-details-1.png)
+#### Manifest Details
+![CCI Supervisor Resource Details 2](../../images/vcfa-cci-resource-details-2.png)
+#### Object Status
+![CCI Supervisor Resource Details 3](../../images/vcfa-cci-resource-details-3.png)
+#### Resource Conditions
+![CCI Supervisor Resource Details 4](../../images/vcfa-cci-resource-details-4.png)
+#### Defined Resource Manifest
+![CCI Supervisor Resource Details 5](../../images/vcfa-cci-resource-details-5.png)
+#### Live Kubernetes Object Manifest
+![CCI Supervisor Resource Details 6](../../images/vcfa-cci-resource-details-6.png)
+
 ## Plugin Components
 
 ### Frontend Plugin
