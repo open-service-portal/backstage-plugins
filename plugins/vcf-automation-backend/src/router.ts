@@ -102,5 +102,56 @@ export async function createRouter(
     res.json(namespace);
   });
 
+  // VM Power Management for deployment-managed VMs
+  router.get('/resources/:resourceId/power-actions/:action', async (req, res) => {
+    const { resourceId, action } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    
+    if (action !== 'PowerOn' && action !== 'PowerOff') {
+      return res.status(400).json({ error: 'Invalid action. Must be PowerOn or PowerOff' });
+    }
+    
+    const result = await vcfService.checkVmPowerAction(resourceId, action as 'PowerOn' | 'PowerOff', instanceName);
+    return res.json(result);
+  });
+
+  router.post('/resources/:resourceId/power-actions/:action', async (req, res) => {
+    const { resourceId, action } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    
+    if (action !== 'PowerOn' && action !== 'PowerOff') {
+      return res.status(400).json({ error: 'Invalid action. Must be PowerOn or PowerOff' });
+    }
+    
+    const result = await vcfService.executeVmPowerAction(resourceId, action as 'PowerOn' | 'PowerOff', instanceName);
+    return res.json(result);
+  });
+
+  // VM Power Management for standalone VMs
+  router.get('/standalone-vms/:namespaceUrnId/:namespaceName/:vmName/status', async (req, res) => {
+    const { namespaceUrnId, namespaceName, vmName } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    
+    const result = await vcfService.getStandaloneVmStatus(namespaceUrnId, namespaceName, vmName, instanceName);
+    return res.json(result);
+  });
+
+  router.put('/standalone-vms/:namespaceUrnId/:namespaceName/:vmName/power-state', async (req, res) => {
+    const { namespaceUrnId, namespaceName, vmName } = req.params;
+    const { powerState, vmData } = req.body;
+    const instanceName = req.query.instance as string | undefined;
+    
+    if (powerState !== 'PoweredOn' && powerState !== 'PoweredOff') {
+      return res.status(400).json({ error: 'Invalid powerState. Must be PoweredOn or PoweredOff' });
+    }
+    
+    if (!vmData) {
+      return res.status(400).json({ error: 'vmData is required' });
+    }
+    
+    const result = await vcfService.executeStandaloneVmPowerAction(namespaceUrnId, namespaceName, vmName, powerState, vmData, instanceName);
+    return res.json(result);
+  });
+
   return router;
 }
