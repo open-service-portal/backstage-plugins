@@ -993,6 +993,26 @@ export class VcfAutomationEntityProvider implements EntityProvider {
               }
             }
           }
+
+          // Generate additional links for VirtualMachine components in all-apps organizations
+          let additionalLinks = [...resourceLinks];
+          if (instance.organizationType === 'all-apps' && 
+              (resource.properties?.object?.kind === 'VirtualMachine' || resource.properties?.manifest?.kind === 'VirtualMachine')) {
+            
+            // Add remote console link
+            const vmName = resource.properties?.object?.metadata?.name || resource.properties?.manifest?.metadata?.name;
+            const namespaceName = resource.properties?.object?.metadata?.namespace || resource.properties?.manifest?.metadata?.namespace;
+            
+            if (vmName && namespaceName) {
+              // Get project name from deployment
+              const projectName = deployment.project.name;
+              
+              additionalLinks.push({
+                url: `${instance.baseUrl}/automation/#/machines/remote-console/${encodeURIComponent(projectName)}/${encodeURIComponent(namespaceName)}/${encodeURIComponent(vmName)}`,
+                title: 'Open Remote Console',
+              });
+            }
+          }
           
           entities.push({
             apiVersion: 'backstage.io/v1alpha1',
@@ -1001,6 +1021,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
             metadata: {
               ...baseEntity.metadata,
               tags,
+              links: additionalLinks,
               annotations: {
                 ...baseEntity.metadata.annotations,
                 'terasky.backstage.io/vcf-automation-cci-resource-context': resource.properties?.context || '',
@@ -1319,13 +1340,32 @@ export class VcfAutomationEntityProvider implements EntityProvider {
       };
 
       const resourceLink = generateResourceLink(resource.kind, resource.metadata.name);
-      const links = resourceLink ? [resourceLink] : [];
+      let links = resourceLink ? [resourceLink] : [];
+
+      // Add remote console link for VirtualMachine standalone resources
+      if (resource.kind === 'VirtualMachine') {
+        const vmName = resource.metadata.name;
+        const namespaceName = resource.metadata.namespace;
+        
+        if (vmName && namespaceName) {
+          // Get project name from project data
+          const projectName = projectMap.get(resource.project.id) || resource.project.name;
+          
+          links.push({
+            url: `${instance.baseUrl}/automation/#/machines/remote-console/${encodeURIComponent(projectName)}/${encodeURIComponent(namespaceName)}/${encodeURIComponent(vmName)}`,
+            title: 'Open Remote Console',
+          });
+        }
+      }
 
       // Find the matching supervisor namespace for subcomponent relationship
       const matchingNamespace = supervisorNamespaces.find(ns => ns.metadata.name === resource.metadata.namespace);
       let subcomponentOf = '';
+      let namespaceUrnId = '';
       if (matchingNamespace) {
         subcomponentOf = `component:default/${matchingNamespace.metadata.uid.toLowerCase()}`;
+        // Extract the URN ID from the namespace annotations
+        namespaceUrnId = matchingNamespace.metadata.annotations?.['infrastructure.cci.vmware.com/id'] || '';
       }
 
       // Check if this VirtualMachine should be a subcomponent of a Cluster instead of namespace
@@ -1368,6 +1408,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
             [`terasky.backstage.io/vcf-automation-version`]: instance.majorVersion.toString(),
             [`terasky.backstage.io/vcf-automation-cci-resource-context`]: JSON.stringify({
               namespace: resource.metadata.namespace,
+              namespaceUrnId: namespaceUrnId,
               apiVersion: resource.apiVersion,
               kind: resource.kind,
               standalone: true,
