@@ -102,20 +102,32 @@ For **all-apps** organization types, the ingestor provides enhanced support for 
 
 ### CCI.Supervisor.Namespace
 - Created as **Component** entities
+- **Two sources**:
+  - **Deployment-managed**: From deployment resource details
+  - **Direct ingestion**: From `/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces` API
 - Contains rich namespace metadata:
   - VM classes and their limits
   - Storage classes and quotas  
   - Zone information
   - Status conditions
   - Namespace endpoint URLs
+- **Project Association**: Linked to project domains via `infrastructure.cci.vmware.com/project-id` annotation
+- **Hierarchy**: Part of `{project-id}-standalone-resources` system (for standalone namespaces)
 - Annotations include:
   - `terasky.backstage.io/vcf-automation-cci-namespace-endpoint`
   - `terasky.backstage.io/vcf-automation-cci-namespace-phase`
+  - `terasky.backstage.io/vcf-automation-supervisor-namespace-data` (for direct ingestion)
+  - `terasky.backstage.io/vcf-automation-resource-origin` ('SUPERVISOR_NAMESPACE' for standalone)
 
 ### CCI.Supervisor.Resource  
 - Created as **Component** entities
-- **Deployment-managed**: Marked as `subcomponentOf` their parent CCI.Supervisor.Namespace
-- **Standalone**: Part of `{project-id}-standalone-resources` system
+- **Complex Subcomponent Relationships**:
+  - **Deployment-managed**: 
+    - **Standard**: `subcomponentOf` their parent CCI.Supervisor.Namespace
+    - **Cluster VMs**: VirtualMachines with `cluster.x-k8s.io/cluster-name` label become `subcomponentOf` the Cluster component
+  - **Standalone**: 
+    - **Standard**: `subcomponentOf` their matching CCI.Supervisor.Namespace (ingested separately)
+    - **Cluster VMs**: VirtualMachines with `capv.vmware.com/cluster.name` label become `subcomponentOf` the Cluster component
 - Contains complete Kubernetes resource data:
   - **Manifest**: Original resource template/specification
   - **Object**: Live Kubernetes object with current status
@@ -131,7 +143,7 @@ For **all-apps** organization types, the ingestor provides enhanced support for 
   - `terasky.backstage.io/vcf-automation-cci-resource-manifest` (JSON)
   - `terasky.backstage.io/vcf-automation-cci-resource-object` (JSON)
   - `terasky.backstage.io/vcf-automation-cci-resource-context`
-  - `terasky.backstage.io/vcf-automation-resource-origin` ('DEPLOYED' or 'STANDALONE')
+  - `terasky.backstage.io/vcf-automation-resource-origin` ('DEPLOYED', 'STANDALONE', or 'SUPERVISOR_NAMESPACE')
 
 ### API Endpoint Usage
 
@@ -144,7 +156,10 @@ The ingestor uses different API endpoints based on organization type:
 #### all-apps  
 - Projects: `/project-service/api/projects/{id}`
 - Deployments: Standard deployment API
-- **Resource Details**: `/deployment/api/deployments/{id}/resources` (for CCI resources)  
+- **Resource Details**: `/deployment/api/deployments/{id}/resources` (for CCI resources)
+- **Standalone Supervisor Resources**: `/deployment/api/supervisor-resources` (paginated)
+- **Supervisor Namespaces**: `/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces` (standalone)
+- **Projects**: `/project-service/api/projects` (for project name resolution)  
 
 ## Links
 

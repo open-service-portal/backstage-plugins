@@ -89,5 +89,18 @@ export async function createRouter(
     res.json(resource);
   });
 
+  router.get('/supervisor-namespaces', async (req, res) => {
+    const instanceName = req.query.instance as string | undefined;
+    const namespaces = await vcfService.getSupervisorNamespaces(instanceName);
+    res.json(namespaces);
+  });
+
+  router.get('/supervisor-namespaces/:namespaceId', async (req, res) => {
+    const { namespaceId } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    const namespace = await vcfService.getSupervisorNamespace(namespaceId, instanceName);
+    res.json(namespace);
+  });
+
   return router;
 }

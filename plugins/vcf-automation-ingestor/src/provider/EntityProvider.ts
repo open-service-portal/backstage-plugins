@@ -121,6 +121,73 @@ interface VcfSupervisorResourceResponse {
   first: boolean;
 }
 
+interface VcfSupervisorNamespace {
+  apiVersion: string;
+  kind: string;
+  metadata: {
+    name: string;
+    namespace: string;
+    uid: string;
+    creationTimestamp: string;
+    resourceVersion: string;
+    annotations: {
+      'infrastructure.cci.vmware.com/id': string;
+      'infrastructure.cci.vmware.com/project-id': string;
+    };
+  };
+  spec: {
+    className: string;
+    description: string;
+    regionName: string;
+    vpcName: string;
+    initialClassConfigOverrides?: {
+      storageClasses?: Array<{
+        name: string;
+        limit: string;
+      }>;
+      zones?: Array<{
+        name: string;
+        cpuLimit: string;
+        cpuReservation: string;
+        memoryLimit: string;
+        memoryReservation: string;
+      }>;
+    };
+  };
+  status: {
+    phase: string;
+    namespaceEndpointURL: string;
+    conditions: Array<{
+      type: string;
+      status: string;
+      lastTransitionTime: string;
+    }>;
+    vmClasses: Array<{
+      name: string;
+    }>;
+    storageClasses: Array<{
+      name: string;
+      limit: string;
+    }>;
+    zones: Array<{
+      name: string;
+      cpuLimit: string;
+      cpuReservation: string;
+      memoryLimit: string;
+      memoryReservation: string;
+    }>;
+  };
+}
+
+interface VcfSupervisorNamespaceResponse {
+  apiVersion: string;
+  kind: string;
+  items: VcfSupervisorNamespace[];
+  metadata: {
+    resourceVersion: string;
+  };
+}
+
 interface VcfInstance {
   baseUrl: string;
   name: string;
@@ -357,6 +424,83 @@ export class VcfAutomationEntityProvider implements EntityProvider {
     }
   }
 
+  private async fetchProjects(instance: VcfInstance): Promise<{ id: string; name: string }[]> {
+    try {
+      await this.authenticate(instance);
+      
+      this.logger.info(`Starting to fetch projects from VCF Automation instance ${instance.name}`);
+      
+      const response = await fetch(
+        `${instance.baseUrl}/project-service/api/projects`,
+        {
+          headers: {
+            Authorization: `Bearer ${instance.token}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch projects from instance ${instance.name} with status ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.content || !Array.isArray(data.content)) {
+        this.logger.debug(`No projects found for instance ${instance.name}`);
+        return [];
+      }
+
+      const projects = data.content.map((project: any) => ({
+        id: project.id,
+        name: project.name,
+      }));
+
+      this.logger.info(`Successfully fetched ${projects.length} projects from instance ${instance.name}`);
+      return projects;
+    } catch (error) {
+      this.logger.error(`Failed to fetch projects from VCF Automation instance ${instance.name}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
+  private async fetchSupervisorNamespaces(instance: VcfInstance): Promise<VcfSupervisorNamespace[]> {
+    try {
+      await this.authenticate(instance);
+      
+      this.logger.info(`Starting to fetch supervisor namespaces from VCF Automation instance ${instance.name}`);
+      
+      const response = await fetch(
+        `${instance.baseUrl}/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces?limit=500`,
+        {
+          headers: {
+            Authorization: `Bearer ${instance.token}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch supervisor namespaces from instance ${instance.name} with status ${response.status}: ${response.statusText}`);
+      }
+
+      const data: VcfSupervisorNamespaceResponse = await response.json();
+      
+      if (!data.items || !Array.isArray(data.items)) {
+        this.logger.debug(`No supervisor namespaces found for instance ${instance.name}`);
+        return [];
+      }
+
+      this.logger.info(`Successfully fetched ${data.items.length} supervisor namespaces from instance ${instance.name}`);
+      return data.items;
+    } catch (error) {
+      this.logger.error(`Failed to fetch supervisor namespaces from VCF Automation instance ${instance.name}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   private async fetchStandaloneSupervisorResources(instance: VcfInstance): Promise<VcfSupervisorResource[]> {
     try {
       await this.authenticate(instance);
@@ -434,12 +578,39 @@ export class VcfAutomationEntityProvider implements EntityProvider {
           const entities = await this.transformToEntities(deployments, instance);
           allEntities.push(...entities);
 
-          // For all-apps instances, also fetch standalone supervisor resources
+          // For all-apps instances, also fetch projects, supervisor namespaces and standalone supervisor resources
           if (instance.organizationType === 'all-apps') {
+            // Fetch projects first to get names
+            let projects: { id: string; name: string }[] = [];
+            try {
+              projects = await this.fetchProjects(instance);
+              this.logger.debug(`Fetched ${projects.length} projects for instance ${instance.name}`);
+            } catch (error) {
+              this.logger.error(`Failed to fetch projects for instance ${instance.name}`, {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              // Continue with other processing even if projects fail
+            }
+
+            // Fetch supervisor namespaces
+            let supervisorNamespaces: VcfSupervisorNamespace[] = [];
+            try {
+              supervisorNamespaces = await this.fetchSupervisorNamespaces(instance);
+              this.logger.debug(`Transforming ${supervisorNamespaces.length} supervisor namespaces into entities for instance ${instance.name}`);
+              const supervisorNamespaceEntities = await this.transformSupervisorNamespacesToEntities(supervisorNamespaces, projects, instance);
+              allEntities.push(...supervisorNamespaceEntities);
+            } catch (error) {
+              this.logger.error(`Failed to process supervisor namespaces for instance ${instance.name}`, {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              // Continue with other processing even if supervisor namespaces fail
+            }
+
+            // Then fetch standalone supervisor resources
             try {
               const standaloneResources = await this.fetchStandaloneSupervisorResources(instance);
               this.logger.debug(`Transforming ${standaloneResources.length} standalone supervisor resources into entities for instance ${instance.name}`);
-              const standaloneCciEntities = await this.transformStandaloneSupervisorResourcesToEntities(standaloneResources, instance);
+              const standaloneCciEntities = await this.transformStandaloneSupervisorResourcesToEntities(standaloneResources, supervisorNamespaces, projects, instance);
               allEntities.push(...standaloneCciEntities);
             } catch (error) {
               this.logger.error(`Failed to process standalone supervisor resources for instance ${instance.name}`, {
@@ -801,6 +972,27 @@ export class VcfAutomationEntityProvider implements EntityProvider {
               tags.push(`kind:${resourceKind.toLowerCase()}`);
             }
           }
+
+          // Check if this VirtualMachine should be a subcomponent of a Cluster instead of namespace
+          let finalSubcomponentOf = subcomponentOf;
+          if (instance.organizationType === 'all-apps' && 
+              (resource.properties?.object?.kind === 'VirtualMachine' || resource.properties?.manifest?.kind === 'VirtualMachine')) {
+            const clusterLabel = resource.properties?.object?.metadata?.labels?.['cluster.x-k8s.io/cluster-name'] ||
+                               resource.properties?.manifest?.metadata?.labels?.['cluster.x-k8s.io/cluster-name'];
+            
+            if (clusterLabel) {
+              // Find the cluster resource in the same deployment
+              const clusterResource = detailedResources?.find(r => 
+                r.name === clusterLabel && 
+                (r.properties?.object?.kind === 'Cluster' || r.properties?.manifest?.kind === 'Cluster')
+              );
+              
+              if (clusterResource) {
+                finalSubcomponentOf = `component:default/${clusterResource.id.toLowerCase()}`;
+                this.logger.debug(`VirtualMachine ${resource.name} will be subcomponent of Cluster ${clusterLabel} instead of namespace`);
+              }
+            }
+          }
           
           entities.push({
             apiVersion: 'backstage.io/v1alpha1',
@@ -819,7 +1011,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
             spec: {
               ...baseEntity.spec,
               lifecycle: 'production',
-              subcomponentOf,
+              subcomponentOf: finalSubcomponentOf,
             },
           });
         } else {
@@ -838,43 +1030,232 @@ export class VcfAutomationEntityProvider implements EntityProvider {
     }));
   }
 
-  private async transformStandaloneSupervisorResourcesToEntities(resources: VcfSupervisorResource[], instance: VcfInstance) {
+  private async transformSupervisorNamespacesToEntities(namespaces: VcfSupervisorNamespace[], projects: { id: string; name: string }[], instance: VcfInstance) {
     const entities: Array<ComponentEntity | DomainEntity | SystemEntity> = [];
     const locationRef = `url:${instance.baseUrl}/vcf-automation`;
-    const projects = new Set<string>();
+    const seenDomains = new Set<string>();
+    const seenStandaloneSystems = new Set<string>();
 
-    this.logger.debug(`Starting to transform ${resources.length} standalone supervisor resources into entities for instance ${instance.name}`);
+    this.logger.debug(`Starting to transform ${namespaces.length} supervisor namespaces into entities for instance ${instance.name}`);
 
-    // First, create project domain entities and standalone resource systems for any projects we encounter
-    for (const resource of resources) {
-      if (resource.project && !projects.has(resource.project.id)) {
-        projects.add(resource.project.id);
+    // Create a map of project IDs to names for quick lookup
+    const projectMap = new Map(projects.map(p => [p.id, p.name]));
+
+    // Group namespaces by project to efficiently create domains and systems
+    const namespacesByProject = new Map<string, VcfSupervisorNamespace[]>();
+    for (const namespace of namespaces) {
+      const projectId = namespace.metadata.annotations['infrastructure.cci.vmware.com/project-id'];
+      const actualProjectId = projectId?.split(':').pop();
+      if (actualProjectId) {
+        if (!namespacesByProject.has(actualProjectId)) {
+          namespacesByProject.set(actualProjectId, []);
+        }
+        namespacesByProject.get(actualProjectId)!.push(namespace);
+      }
+    }
+
+    // Create domain and standalone system entities for each project that has supervisor namespaces
+    for (const [projectId, projectNamespaces] of namespacesByProject) {
+      // Create domain entity if not already created (using same logic as deployment flow)
+      if (!seenDomains.has(projectId)) {
+        seenDomains.add(projectId);
         
-        // Create the project domain entity
-        const projectEntity: DomainEntity = {
+        const projectName = projectMap.get(projectId) || `Project ${projectId}`;
+        
+        // Generate version-specific links for Domain entities (same as deployment flow)
+        const domainLinks = [];
+        if (instance.majorVersion >= 9) {
+          // Version 9+ links - different URLs based on organization type
+          if (instance.organizationType === 'all-apps') {
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${projectId}"%5D`,
+              title: 'View Project Deployments in VCF Automation',
+            });
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/manage-and-govern/projects/edit/${projectId}/summary`,
+              title: 'Edit Project in VCF Automation',
+            });
+          }
+        }
+        
+        const domainViewUrl = instance.majorVersion >= 9 
+          ? (instance.organizationType === 'all-apps'
+              ? `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${projectId}"%5D`
+              : `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${projectId}"%5D`)
+          : `${instance.baseUrl}/automation/#/service/catalog/consume/deployment?projects=%5B"${projectId}"%5D`;
+        
+        const domainEntity: DomainEntity = {
           apiVersion: 'backstage.io/v1alpha1',
           kind: 'Domain',
           metadata: {
-            name: resource.project.id.toLowerCase(),
-            title: resource.project.name,
+            name: projectId.toLowerCase(),
+            title: projectName,
             namespace: 'default',
             annotations: {
               [ANNOTATION_LOCATION]: locationRef,
               [ANNOTATION_ORIGIN_LOCATION]: locationRef,
-              [`backstage.io/view-url`]: `${instance.baseUrl}/automation/#/consume/projects/${resource.project.id}`,
+              'backstage.io/view-url': domainViewUrl,
+              'terasky.backstage.io/vcf-automation-instance': instance.name,
+              'terasky.backstage.io/vcf-automation-version': instance.majorVersion.toString(),
+            },
+            links: domainLinks,
+            tags: [`vcf-automation:${instance.name}`, 'vcf-automation-project'],
+          },
+          spec: {
+            owner: 'user:admin',
+            type: 'vcf-automation-project',
+          },
+        };
+        
+        entities.push(domainEntity);
+      }
+
+      // Create standalone resources system for this project
+      if (!seenStandaloneSystems.has(projectId)) {
+        seenStandaloneSystems.add(projectId);
+        
+        const projectName = projectMap.get(projectId) || `Project ${projectId}`;
+        
+        const standaloneSystemEntity: SystemEntity = {
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'System',
+          metadata: {
+            name: `${projectId.toLowerCase()}-standalone-resources`,
+            title: `${projectName}-standalone-resources`,
+            namespace: 'default',
+            annotations: {
+              [ANNOTATION_LOCATION]: locationRef,
+              [ANNOTATION_ORIGIN_LOCATION]: locationRef,
               [`terasky.backstage.io/vcf-automation-instance`]: instance.name,
               [`terasky.backstage.io/vcf-automation-version`]: instance.majorVersion.toString(),
             },
             links: [
               {
-                url: `${instance.baseUrl}/automation/#/consume/projects/${resource.project.id}`,
-                title: 'Open in VCF Automation',
+                url: `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/supervisor-resources`,
+                title: 'View Standalone Resources in VCF Automation',
               },
             ],
+            tags: [`vcf-automation:${instance.name}`, 'vcf-automation-standalone-system'],
+          },
+          spec: {
+            owner: 'user:admin',
+            domain: projectId.toLowerCase(),
+          },
+        };
+        
+        entities.push(standaloneSystemEntity);
+      }
+
+      // Create component entities for each supervisor namespace in this project
+      for (const namespace of projectNamespaces) {
+        const namespaceEntity: ComponentEntity = {
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'Component',
+          metadata: {
+            name: namespace.metadata.uid.toLowerCase(),
+            title: namespace.metadata.name,
+            namespace: 'default',
+            annotations: {
+              [ANNOTATION_LOCATION]: locationRef,
+              [ANNOTATION_ORIGIN_LOCATION]: locationRef,
+              [`backstage.io/view-url`]: namespace.status.namespaceEndpointURL,
+              [`terasky.backstage.io/vcf-automation-resource-type`]: 'CCI.Supervisor.Namespace',
+              [`terasky.backstage.io/vcf-automation-resource-created-at`]: namespace.metadata.creationTimestamp,
+              [`terasky.backstage.io/vcf-automation-resource-origin`]: 'SUPERVISOR_NAMESPACE',
+              [`terasky.backstage.io/vcf-automation-resource-sync-status`]: 'SUCCESS',
+              [`terasky.backstage.io/vcf-automation-resource-state`]: 'OK',
+              [`terasky.backstage.io/vcf-automation-instance`]: instance.name,
+              [`terasky.backstage.io/vcf-automation-version`]: instance.majorVersion.toString(),
+              [`terasky.backstage.io/vcf-automation-cci-namespace-endpoint`]: namespace.status.namespaceEndpointURL,
+              [`terasky.backstage.io/vcf-automation-cci-namespace-phase`]: namespace.status.phase,
+              [`terasky.backstage.io/vcf-automation-supervisor-namespace-data`]: JSON.stringify(namespace),
+            },
+            links: [
+              {
+                url: namespace.status.namespaceEndpointURL,
+                title: 'Open Namespace Endpoint',
+              },
+            ],
+            tags: [`vcf-automation:${instance.name}`, 'vcf-automation-resource', 'supervisor-namespace', `kind:${namespace.kind.toLowerCase()}`],
+          },
+          spec: {
+            owner: 'user:admin',
+            type: 'CCI.Supervisor.Namespace',
+            system: `${projectId.toLowerCase()}-standalone-resources`,
+            lifecycle: 'production',
+          },
+        };
+
+        entities.push(namespaceEntity);
+      }
+    }
+
+    this.logger.debug(`Successfully transformed ${namespaces.length} supervisor namespaces into ${entities.length} entities for instance ${instance.name}`);
+
+    return entities.map(entity => ({
+      entity,
+      locationKey: locationRef,
+    }));
+  }
+
+  private async transformStandaloneSupervisorResourcesToEntities(resources: VcfSupervisorResource[], supervisorNamespaces: VcfSupervisorNamespace[], projects: { id: string; name: string }[], instance: VcfInstance) {
+    const entities: Array<ComponentEntity | DomainEntity | SystemEntity> = [];
+    const locationRef = `url:${instance.baseUrl}/vcf-automation`;
+    const seenProjects = new Set<string>();
+
+    this.logger.debug(`Starting to transform ${resources.length} standalone supervisor resources into entities for instance ${instance.name}`);
+
+    // Create a map of project IDs to names for quick lookup
+    const projectMap = new Map(projects.map(p => [p.id, p.name]));
+
+    // First, create project domain entities and standalone resource systems for any projects we encounter
+    for (const resource of resources) {
+      if (resource.project && !seenProjects.has(resource.project.id)) {
+        seenProjects.add(resource.project.id);
+        
+        const projectName = projectMap.get(resource.project.id) || resource.project.name;
+        
+        // Create domain entity using same logic as deployment flow
+        const domainLinks = [];
+        if (instance.majorVersion >= 9) {
+          if (instance.organizationType === 'all-apps') {
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${resource.project.id}"%5D`,
+              title: 'View Project Deployments in VCF Automation',
+            });
+            domainLinks.push({
+              url: `${instance.baseUrl}/automation/#/manage-and-govern/projects/edit/${resource.project.id}/summary`,
+              title: 'Edit Project in VCF Automation',
+            });
+          }
+        }
+        
+        const domainViewUrl = instance.majorVersion >= 9 
+          ? (instance.organizationType === 'all-apps'
+              ? `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/deployments?projects=%5B"${resource.project.id}"%5D`
+              : `${instance.baseUrl}/automation/#/consume/deployment?projects=%5B"${resource.project.id}"%5D`)
+          : `${instance.baseUrl}/automation/#/service/catalog/consume/deployment?projects=%5B"${resource.project.id}"%5D`;
+        
+        const projectEntity: DomainEntity = {
+          apiVersion: 'backstage.io/v1alpha1',
+          kind: 'Domain',
+          metadata: {
+            name: resource.project.id.toLowerCase(),
+            title: projectName,
+            namespace: 'default',
+            annotations: {
+              [ANNOTATION_LOCATION]: locationRef,
+              [ANNOTATION_ORIGIN_LOCATION]: locationRef,
+              'backstage.io/view-url': domainViewUrl,
+              'terasky.backstage.io/vcf-automation-instance': instance.name,
+              'terasky.backstage.io/vcf-automation-version': instance.majorVersion.toString(),
+            },
+            links: domainLinks,
             tags: [`vcf-automation:${instance.name}`, 'vcf-automation-project'],
           },
           spec: {
             owner: 'user:admin',
+            type: 'vcf-automation-project',
           },
         };
         
@@ -886,15 +1267,13 @@ export class VcfAutomationEntityProvider implements EntityProvider {
           kind: 'System',
           metadata: {
             name: `${resource.project.id.toLowerCase()}-standalone-resources`,
-            title: `${resource.project.name}-standalone-resources`,
+            title: `${projectName}-standalone-resources`,
             namespace: 'default',
             annotations: {
               [ANNOTATION_LOCATION]: locationRef,
               [ANNOTATION_ORIGIN_LOCATION]: locationRef,
-              [`backstage.io/view-url`]: `${instance.baseUrl}/automation/#/build-and-deploy/all-resources/supervisor-resources`,
               [`terasky.backstage.io/vcf-automation-instance`]: instance.name,
               [`terasky.backstage.io/vcf-automation-version`]: instance.majorVersion.toString(),
-              [`terasky.backstage.io/vcf-automation-system-type`]: 'standalone-resources',
             },
             links: [
               {
@@ -941,6 +1320,32 @@ export class VcfAutomationEntityProvider implements EntityProvider {
 
       const resourceLink = generateResourceLink(resource.kind, resource.metadata.name);
       const links = resourceLink ? [resourceLink] : [];
+
+      // Find the matching supervisor namespace for subcomponent relationship
+      const matchingNamespace = supervisorNamespaces.find(ns => ns.metadata.name === resource.metadata.namespace);
+      let subcomponentOf = '';
+      if (matchingNamespace) {
+        subcomponentOf = `component:default/${matchingNamespace.metadata.uid.toLowerCase()}`;
+      }
+
+      // Check if this VirtualMachine should be a subcomponent of a Cluster instead of namespace
+      if (resource.kind === 'VirtualMachine') {
+        const clusterLabel = resource.metadata.labels?.['capv.vmware.com/cluster.name'];
+        
+        if (clusterLabel) {
+          // Find the cluster resource in the same collection of standalone resources
+          const clusterResource = resources.find(r => 
+            r.kind === 'Cluster' && 
+            r.metadata.name === clusterLabel &&
+            r.metadata.namespace === resource.metadata.namespace // Same namespace
+          );
+          
+          if (clusterResource) {
+            subcomponentOf = `component:default/${clusterResource.id.toLowerCase()}`;
+            this.logger.debug(`Standalone VirtualMachine ${resource.metadata.name} will be subcomponent of Cluster ${clusterLabel} instead of namespace`);
+          }
+        }
+      }
 
       // Create the CCI resource component
       const resourceEntity: ComponentEntity = {
@@ -989,6 +1394,7 @@ export class VcfAutomationEntityProvider implements EntityProvider {
           type: 'CCI.Supervisor.Resource',
           system: `${resource.project.id.toLowerCase()}-standalone-resources`,
           lifecycle: 'production',
+          subcomponentOf,
         },
       };
 

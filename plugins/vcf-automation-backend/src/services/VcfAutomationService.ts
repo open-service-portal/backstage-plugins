@@ -323,4 +323,28 @@ export class VcfAutomationService {
       return { error: 'Service temporarily unavailable', status: 'error' };
     }
   }
+
+  async getSupervisorNamespaces(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces?limit=500`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor namespaces`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces/${namespaceId}`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor namespace ${namespaceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
 } 

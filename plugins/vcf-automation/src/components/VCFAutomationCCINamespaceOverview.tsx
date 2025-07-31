@@ -41,22 +41,61 @@ export const VCFAutomationCCINamespaceOverview = () => {
   // Parse annotation data once using useMemo
   const annotationData = useMemo(() => {
     const resourceProperties = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'];
+    const supervisorNamespaceData = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-supervisor-namespace-data'];
+    const origin = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'];
+    
+    let namespaceData = null;
+    
+    // For standalone namespaces, use supervisor namespace data
+    if (supervisorNamespaceData && supervisorNamespaceData !== '{}') {
+      try {
+        namespaceData = JSON.parse(supervisorNamespaceData);
+      } catch (e) {
+        // Keep null if parsing fails
+      }
+    }
+    
+    // For deployment-managed namespaces, use resource properties
+    if (!namespaceData && resourceProperties && resourceProperties !== '{}') {
+      try {
+        namespaceData = JSON.parse(resourceProperties);
+      } catch (e) {
+        // Keep null if parsing fails
+      }
+    }
+    
     return {
-      namespaceData: resourceProperties && resourceProperties !== '{}' ? JSON.parse(resourceProperties) : null,
+      namespaceData,
+      isStandalone: origin === 'SUPERVISOR_NAMESPACE',
+      origin: origin || '',
     };
-  }, [entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties']]);
+  }, [
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-supervisor-namespace-data'],
+    entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'],
+  ]);
 
   // Check if we need to make API call
   const needsApiCall = !annotationData.namespaceData;
 
   // Fallback API call if annotation data is missing or empty
   const { value: apiNamespaceData, loading, error } = useAsync(async () => {
-    if (!needsApiCall || !deploymentId || !resourceId) {
+    if (!needsApiCall || !resourceId) {
       return null;
     }
 
     try {
-      // Fetch detailed resource data from the backend
+      // For standalone namespaces, fetch supervisor namespace directly
+      if (annotationData.isStandalone) {
+        const response = await api.getSupervisorNamespace(resourceId, instanceName);
+        return response;
+      }
+      
+      // For deployment-managed namespaces, fetch from deployment resources
+      if (!deploymentId) {
+        return null;
+      }
+      
       const response = await api.getDeploymentResources(deploymentId, instanceName);
       let resources = null;
       if (response) {
@@ -75,14 +114,14 @@ export const VCFAutomationCCINamespaceOverview = () => {
       console.error('Failed to fetch namespace data:', apiError);
       return null;
     }
-  }, [needsApiCall, deploymentId, resourceId, instanceName]);
+  }, [needsApiCall, deploymentId, resourceId, instanceName, annotationData.isStandalone]);
 
   // Determine final data to use
   const namespaceData = annotationData.namespaceData || apiNamespaceData;
 
   if (loading) {
     return (
-      <InfoCard title="CCI Supervisor Namespace">
+      <InfoCard title={`CCI Supervisor Namespace${annotationData.isStandalone ? ' (Standalone)' : ''}`}>
         <Progress />
       </InfoCard>
     );
@@ -94,7 +133,7 @@ export const VCFAutomationCCINamespaceOverview = () => {
 
   if (!namespaceData) {
     return (
-      <InfoCard title="CCI Supervisor Namespace">
+              <InfoCard title={`CCI Supervisor Namespace${annotationData.isStandalone ? ' (Standalone)' : ''}`}>
         <Typography>No namespace data available.</Typography>
       </InfoCard>
     );
@@ -123,7 +162,7 @@ export const VCFAutomationCCINamespaceOverview = () => {
   };
 
   return (
-    <InfoCard title="CCI Supervisor Namespace Overview">
+            <InfoCard title={`CCI Supervisor Namespace Overview${annotationData.isStandalone ? ' (Standalone)' : ''}`}>
       <Grid container spacing={3}>
         <Grid item xs={12}>
           <Typography variant="h6" className={classes.sectionTitle}>

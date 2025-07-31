@@ -53,6 +53,10 @@ The plugin exposes the following endpoints:
 - `GET /api/vcf-automation/deployments/:id/resources` - Get all resources for a deployment
 - `POST /api/vcf-automation/deployments/:id/operations` - Execute deployment operations
 - `GET /api/vcf-automation/events` - Stream VCF events
+- `GET /api/vcf-automation/supervisor-resources` - List all supervisor resources (paginated)
+- `GET /api/vcf-automation/supervisor-resources/:id` - Get specific supervisor resource details
+- `GET /api/vcf-automation/supervisor-namespaces` - List all supervisor namespaces
+- `GET /api/vcf-automation/supervisor-namespaces/:id` - Get specific supervisor namespace details
 
 ## Links
 

@@ -131,6 +131,8 @@ export interface VcfAutomationApi {
   getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any>;
   getSupervisorResources(instanceName?: string): Promise<any>;
   getSupervisorResource(resourceId: string, instanceName?: string): Promise<any>;
+  getSupervisorNamespaces(instanceName?: string): Promise<any>;
+  getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any>;
 }
 
 export const vcfAutomationApiRef = createApiRef<VcfAutomationApi>({
@@ -316,6 +318,38 @@ export class VcfAutomationClient implements VcfAutomationApi {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch supervisor resource: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorNamespaces(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-namespaces?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-namespaces`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor namespaces: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-namespaces/${namespaceId}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-namespaces/${namespaceId}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor namespace: ${response.statusText}`);
     }
     return await response.json();
   }

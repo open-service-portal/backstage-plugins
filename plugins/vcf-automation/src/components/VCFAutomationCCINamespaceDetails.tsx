@@ -60,17 +60,35 @@ export const VCFAutomationCCINamespaceDetails = () => {
   const { entity } = useEntity();
 
   const resourceProperties = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-properties'];
+  const supervisorNamespaceData = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-supervisor-namespace-data'];
   const namespaceEndpoint = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-namespace-endpoint'];
   const namespacePhase = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-cci-namespace-phase'];
   const resourceState = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-state'];
   const syncStatus = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-sync-status'];
   const createdAt = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-created-at'];
+  const origin = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'];
 
-  const namespaceData = resourceProperties ? JSON.parse(resourceProperties) : null;
+  const isStandalone = origin === 'SUPERVISOR_NAMESPACE';
+  
+  // For standalone namespaces, use supervisor namespace data; for deployment-managed, use resource properties
+  let namespaceData = null;
+  if (isStandalone && supervisorNamespaceData) {
+    try {
+      namespaceData = JSON.parse(supervisorNamespaceData);
+    } catch (e) {
+      // Keep null if parsing fails
+    }
+  } else if (resourceProperties) {
+    try {
+      namespaceData = JSON.parse(resourceProperties);
+    } catch (e) {
+      // Keep null if parsing fails
+    }
+  }
 
   if (!namespaceData) {
     return (
-      <InfoCard title="CCI Supervisor Namespace Details">
+      <InfoCard title={`CCI Supervisor Namespace Details${isStandalone ? ' (Standalone)' : ''}`}>
         <Typography>No namespace data available.</Typography>
       </InfoCard>
     );
