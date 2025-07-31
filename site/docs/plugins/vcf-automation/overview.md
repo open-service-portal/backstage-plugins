@@ -1,16 +1,74 @@
 # VCF Automation Plugins
 
 The VCF Automation plugins provide comprehensive visibility and management capabilities for VMware Cloud Foundation (VCF) deployments within Backstage. It enables teams to monitor deployments, manage resources, and oversee project configurations through an intuitive interface.
-The plugins support Aria Automation 8.x as well as VCF Automation 9.x.
+The plugins support Aria Automation 8.x as well as VCF Automation 9.x, including both vm-apps (classic) and all-apps organization types.
 
 ## Features
 
 - **Deployment Monitoring**: Track VCF deployment status and operations
-- **Resource Management**: Manage vSphere VMs and other VCF resources
-- **Project Configuration**: Configure and monitor VCF projects
+- **Resource Management**: Manage vSphere VMs and other VCF resources including CCI Supervisor resources
+- **Project Configuration**: Configure and monitor VCF projects across different organization types
+- **CCI Support**: Full support for Cloud Consuption Interface (CCI) Supervisor namespaces and resources
+- **Multi-Organization Type**: Support for both vm-apps (classic) and all-apps organization models in VCF 9
 - **Permission Controls**: Fine-grained access control integration
-- **Entity Integration**: Seamless catalog entity synchronization
-- **Status Tracking**: Real-time deployment and resource status
+- **Entity Integration**: Seamless catalog entity synchronization with proper entity relationships
+- **Status Tracking**: Real-time deployment and resource status with live Kubernetes object monitoring
+- **YAML Visualization**: Beautiful syntax-highlighted YAML rendering for Kubernetes manifests
+
+## Screenshots
+
+### Project Overview
+![Project View](../../images/vcf-proj-overview.png)
+
+### Project Details
+![Project Details 1](../../images/vcf-proj-details-1.png)
+![Project Details 2](../../images/vcf-proj-details-2.png)
+![Project Details 3](../../images/vcf-proj-details-3.png)
+
+### Deployment Overview
+![Deployment View](../../images/vcf-deploy-overview.png)
+
+### Deployment Details
+![Deployment Details 1](../../images/vcf-deploy-details-1.png)
+![Deployment Details 2](../../images/vcf-deploy-details-2.png)
+
+### vSphere VM Overview (VCFA 8 and VM Apps orgs in VCFA 9)
+![vSphere VM View](../../images/vcf-vm-overview.png)
+
+### vSphere VM Details (VCFA 8 and VM Apps orgs in VCFA 9)
+![vSphere VM Details 1](../../images/vcf-vm-details-1.png)
+![vSphere VM Details 2](../../images/vcf-vm-details-2.png)
+
+### Resource Overview (VCFA 8 and VM Apps orgs in VCFA 9)
+![Resource View](../../images/vcf-resource-overview.png)
+
+### Resource Details (VCFA 8 and VM Apps orgs in VCFA 9)
+![Resource Details](../../images/vcf-resource-details.png)
+
+### CCI Supervisor Namespace Overview (VCFA 9 All Apps Orgs)
+![CCI Supervisor Namespace View](../../images/vcfa-cci-ns.png)
+
+### CCI Supervisor Namespace Details (VCFA 9 All Apps Orgs)
+![CCI Supervisor Namespace Details 1](../../images/vcfa-cci-ns-details-1.png)
+![CCI Supervisor Namespace Details 2](../../images/vcfa-cci-ns-details-2.png)
+
+### CCI Supervisor Resource Overview (VCFA 9 All Apps Orgs)
+![CCI Supervisor Resource View 1](../../images/vcfa-cci-resource-1.png)
+![CCI Supervisor Resource View 2](../../images/vcfa-cci-resource-2.png)
+
+### CCI Supervisor Resource Details (VCFA 9 All Apps Orgs)
+#### Basic Information
+![CCI Supervisor Resource Details 1](../../images/vcfa-cci-resource-details-1.png)
+#### Manifest Details
+![CCI Supervisor Resource Details 2](../../images/vcfa-cci-resource-details-2.png)
+#### Object Status
+![CCI Supervisor Resource Details 3](../../images/vcfa-cci-resource-details-3.png)
+#### Resource Conditions
+![CCI Supervisor Resource Details 4](../../images/vcfa-cci-resource-details-4.png)
+#### Defined Resource Manifest
+![CCI Supervisor Resource Details 5](../../images/vcfa-cci-resource-details-5.png)
+#### Live Kubernetes Object Manifest
+![CCI Supervisor Resource Details 6](../../images/vcfa-cci-resource-details-6.png)
 
 ## Plugin Components
 
@@ -56,8 +114,33 @@ The plugin provides a backend that:
 - `VCFAutomationGenericResourceDetails`: Resource configuration
 
 ### Project Components
-- `VCFAutomationProjectOverview`: Project status overview
-- `VCFAutomationProjectDetails`: Project configuration details
+- `VCFAutomationProjectOverview`: Project status overview (supports both vm-apps and all-apps)
+- `VCFAutomationProjectDetails`: Project configuration details (supports both vm-apps and all-apps)
+
+### CCI Components (New)
+- `VCFAutomationCCINamespaceOverview`: CCI Supervisor Namespace overview with VM classes, storage classes, and zones
+- `VCFAutomationCCINamespaceDetails`: Detailed CCI Supervisor Namespace information with status tables
+- `VCFAutomationCCIResourceOverview`: CCI Supervisor Resource overview with manifest and object data
+- `VCFAutomationCCIResourceDetails`: Detailed CCI Supervisor Resource with tabbed views and YAML rendering
+
+### Entity Types Created
+
+The ingestor creates the following Backstage entity types:
+
+- **Domain**: VCF Projects (with project-specific external links)
+- **System**: VCF Deployments (with deployment-specific external links)
+- **Component**: 
+  - vSphere Virtual Machines (Cloud.vSphere.Machine)
+  - CCI Supervisor Namespaces (CCI.Supervisor.Namespace)
+  - CCI Supervisor Resources (CCI.Supervisor.Resource)
+- **Resource**: Other VCF resources (generic resources)
+
+### Entity Relationships
+
+- **CCI Supervisor Resources** are marked as `subcomponentOf` their parent CCI Supervisor Namespace
+- **Deployments** belong to their parent Project domain
+- **Resources** are part of their parent Deployment system
+- **Dependencies** are properly tracked between resources using `dependsOn` relationships
 
 
 ## Prerequisites

@@ -165,8 +165,10 @@ export const Root = ({ children }: PropsWithChildren<{}>) => (
             </Typography>
             <SidebarSubmenuItem title="Projects" to="catalog?filters[kind]=domain&filters[type]=vcf-automation-project" icon={FaProjectDiagram} />
             <SidebarSubmenuItem title="Deployments" to="catalog?filters[kind]=system&filters[type]=vcf-automation-deployment" icon={FaObjectGroup} />
-            <SidebarSubmenuItem title="VMs" to="catalog?filters[kind]=component&filters[type]=Cloud.vSphere.Machine" icon={FaServer} />
-            <SidebarSubmenuItem title="Resources" to="catalog?filters[kind]=resource&filters[tags]=vcf-automation-resource" icon={FaCloud} />
+            <SidebarSubmenuItem title="vSphere VMs" to="catalog?filters[kind]=component&filters[type]=cloud.vsphere.machine" icon={FaServer} />
+            <SidebarSubmenuItem title="Supervisor Namespaces" to="catalog?filters[kind]=component&filters[type]=cci.supervisor.namespace" icon={SiKubernetes} />
+            <SidebarSubmenuItem title="Supervisor Resources" to="catalog?filters[kind]=component&filters[type]=cci.supervisor.resource" icon={SiKubernetes} />
+            <SidebarSubmenuItem title="Other Resources" to="catalog?filters[kind]=resource&filters[tags]=vcf-automation-resource" icon={FaCloud} />
           </SidebarSubmenu>
         </SidebarItem>
         

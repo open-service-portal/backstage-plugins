@@ -49,6 +49,102 @@ import {
         },
       },
     }),
+    components: {
+      // Override Backstage SidebarSubmenu width to be adaptive
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            // Target all sidebar submenu papers with adaptive sizing
+            '&[role="presentation"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // More specific targeting for nested lists
+            '& .MuiList-root': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+          },
+        },
+      },
+      // Target the Popper component that contains the submenu
+      MuiPopper: {
+        styleOverrides: {
+          root: {
+            '& .MuiPaper-root': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // Ensure the popper itself is adaptive
+            minWidth: '100px !important',
+            maxWidth: '400px !important',
+            width: 'max-content !important',
+          },
+        },
+      },
+      // Target Menu components as Backstage might use these for submenus
+      MuiMenu: {
+        styleOverrides: {
+          paper: {
+            minWidth: '100px !important',
+            maxWidth: '400px !important',
+            width: 'max-content !important',
+            whiteSpace: 'nowrap !important',
+          },
+        },
+      },
+      // Target List items to prevent text wrapping
+      MuiListItem: {
+        styleOverrides: {
+          root: {
+            whiteSpace: 'nowrap !important',
+            overflow: 'visible !important',
+            textOverflow: 'clip !important',
+          },
+        },
+      },
+      // Target MenuItem components
+      MuiMenuItem: {
+        styleOverrides: {
+          root: {
+            whiteSpace: 'nowrap !important',
+            overflow: 'visible !important',
+            textOverflow: 'clip !important',
+          },
+        },
+      },
+      // Global CSS override for sidebar submenu specific classes
+      MuiCssBaseline: {
+        styleOverrides: {
+          '@global': {
+            // Target any element with sidebar submenu in class name
+            '[class*="SidebarSubmenu"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+            // Target Material-UI menu components used in sidebar
+            '.MuiPaper-root[role="presentation"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // Force all sidebar submenu related containers to be adaptive
+            '[data-testid*="submenu"], [class*="submenu"], [id*="submenu"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+          },
+        },
+      },
+    },
     defaultPageTheme: 'home',
     fontFamily: 'Comic Sans MS',
     /* below drives the header colors */
@@ -120,6 +216,102 @@ import {
         },
       },
     }),
+    components: {
+      // Override Backstage SidebarSubmenu width to be adaptive
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            // Target all sidebar submenu papers with adaptive sizing
+            '&[role="presentation"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // More specific targeting for nested lists
+            '& .MuiList-root': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+          },
+        },
+      },
+      // Target the Popper component that contains the submenu
+      MuiPopper: {
+        styleOverrides: {
+          root: {
+            '& .MuiPaper-root': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // Ensure the popper itself is adaptive
+            minWidth: '100px !important',
+            maxWidth: '400px !important',
+            width: 'max-content !important',
+          },
+        },
+      },
+      // Target Menu components as Backstage might use these for submenus
+      MuiMenu: {
+        styleOverrides: {
+          paper: {
+            minWidth: '100px !important',
+            maxWidth: '400px !important',
+            width: 'max-content !important',
+            whiteSpace: 'nowrap !important',
+          },
+        },
+      },
+      // Target List items to prevent text wrapping
+      MuiListItem: {
+        styleOverrides: {
+          root: {
+            whiteSpace: 'nowrap !important',
+            overflow: 'visible !important',
+            textOverflow: 'clip !important',
+          },
+        },
+      },
+      // Target MenuItem components
+      MuiMenuItem: {
+        styleOverrides: {
+          root: {
+            whiteSpace: 'nowrap !important',
+            overflow: 'visible !important',
+            textOverflow: 'clip !important',
+          },
+        },
+      },
+      // Global CSS override for sidebar submenu specific classes
+      MuiCssBaseline: {
+        styleOverrides: {
+          '@global': {
+            // Target any element with sidebar submenu in class name
+            '[class*="SidebarSubmenu"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+            // Target Material-UI menu components used in sidebar
+            '.MuiPaper-root[role="presentation"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+              whiteSpace: 'nowrap !important',
+            },
+            // Force all sidebar submenu related containers to be adaptive
+            '[data-testid*="submenu"], [class*="submenu"], [id*="submenu"]': {
+              minWidth: '100px !important',
+              maxWidth: '400px !important',
+              width: 'max-content !important',
+            },
+          },
+        },
+      },
+    },
     defaultPageTheme: 'home',
     fontFamily: 'Roboto, sans-serif',
     /* below drives the header colors */

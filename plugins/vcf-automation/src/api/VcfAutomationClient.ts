@@ -126,6 +126,18 @@ export interface VcfAutomationApi {
   getProjectDetails(projectId: string, instanceName?: string): Promise<VcfProject>;
   getGenericResourceDetails(deploymentId: string, resourceId: string, instanceName?: string): Promise<any>;
   getDeploymentDetails(deploymentId: string, instanceName?: string): Promise<any>;
+  getProjects(instanceName?: string): Promise<any>;
+  getDeployments(instanceName?: string): Promise<any>;
+  getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any>;
+  getSupervisorResources(instanceName?: string): Promise<any>;
+  getSupervisorResource(resourceId: string, instanceName?: string): Promise<any>;
+  getSupervisorNamespaces(instanceName?: string): Promise<any>;
+  getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any>;
+  // VM Power Management
+  checkVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any>;
+  executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any>;
+  getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any>;
+  executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any>;
 }
 
 export const vcfAutomationApiRef = createApiRef<VcfAutomationApi>({
@@ -234,6 +246,187 @@ export class VcfAutomationClient implements VcfAutomationApi {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch project details: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getProjects(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    const url = instanceName 
+      ? `${baseUrl}/projects?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/projects`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch projects: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getDeployments(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    const url = instanceName 
+      ? `${baseUrl}/deployments?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/deployments`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch deployments: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+        const url = instanceName
+      ? `${baseUrl}/deployments/${deploymentId}/resources?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/deployments/${deploymentId}/resources`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch deployment resources: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorResources(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-resources?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-resources`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor resources: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorResource(resourceId: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-resources/${resourceId}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-resources/${resourceId}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor resource: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorNamespaces(instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-namespaces?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-namespaces`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor namespaces: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/supervisor-namespaces/${namespaceId}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/supervisor-namespaces/${namespaceId}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supervisor namespace: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // VM Power Management for deployment-managed VMs
+  async checkVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/resources/${resourceId}/power-actions/${action}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/resources/${resourceId}/power-actions/${action}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to check VM power action: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/resources/${resourceId}/power-actions/${action}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/resources/${resourceId}/power-actions/${action}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to execute VM power action: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // VM Power Management for standalone VMs
+  async getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/status?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/status`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to get standalone VM status: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/power-state?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/power-state`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ powerState, vmData }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to execute standalone VM power action: ${response.statusText}`);
     }
     return await response.json();
   }

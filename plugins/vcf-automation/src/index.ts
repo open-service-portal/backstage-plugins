@@ -7,6 +7,11 @@ export { VCFAutomationVSphereVMDetails } from './components/VCFAutomationVSphere
 export { VCFAutomationGenericResourceDetails } from './components/VCFAutomationGenericResourceDetails';
 export { VCFAutomationGenericResourceOverview } from './components/VCFAutomationGenericResourceOverview'; 
 export { VCFAutomationDeploymentOverview } from './components/VCFAutomationDeploymentOverview';
+export { VCFAutomationCCINamespaceOverview } from './components/VCFAutomationCCINamespaceOverview';
+export { VCFAutomationCCIResourceOverview } from './components/VCFAutomationCCIResourceOverview';
+export { VCFAutomationCCINamespaceDetails } from './components/VCFAutomationCCINamespaceDetails';
+export { VCFAutomationCCIResourceDetails } from './components/VCFAutomationCCIResourceDetails';
+export { VCFAutomationVMPowerManagement } from './components/VCFAutomationVMPowerManagement';
 
 // API exports
 export { vcfAutomationApiRef, VcfAutomationClient } from './api/VcfAutomationClient';
@@ -29,4 +34,11 @@ export type {
   VcfResource,
   VcfProjectZone,
   VcfProject,
+  CciSupervisorNamespace,
+  CciSupervisorResource,
+  VmPowerAction,
+  VmPowerActionRequest,
+  StandaloneVmStatus,
+  VmPowerState,
+  VmPowerActionType,
 } from './types';

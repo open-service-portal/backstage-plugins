@@ -88,6 +88,10 @@ import {
   VCFAutomationDeploymentOverview,
   VCFAutomationGenericResourceDetails,
   VCFAutomationGenericResourceOverview,
+  VCFAutomationCCINamespaceOverview,
+  VCFAutomationCCINamespaceDetails,
+  VCFAutomationCCIResourceOverview,
+  VCFAutomationCCIResourceDetails,
 } from '@terasky/backstage-plugin-vcf-automation';
 import { AIRulesComponent } from '@terasky/backstage-plugin-ai-rules';
 
@@ -367,6 +371,62 @@ const vcfAutomationVSphereVMPage = (
   </EntityLayout>
 );
 
+const vcfAutomationCCINamespaceOverviewContent = (
+  <Grid container spacing={3} alignItems="stretch">
+    <Grid item md={6}>
+      <EntityAboutCard variant="gridItem" />
+    </Grid>
+    <Grid item md={6}>
+      <VCFAutomationCCINamespaceOverview />
+    </Grid>
+    <Grid item md={6} xs={12}>
+      <EntityCatalogGraphCard variant="gridItem" height={400} />
+    </Grid>
+    <Grid item md={4} xs={12}>
+      <EntityLinksCard />
+    </Grid>
+  </Grid>
+);
+
+const vcfAutomationCCINamespacePage = (
+  <EntityLayout>
+    <EntityLayout.Route path="/" title="Overview">
+      {vcfAutomationCCINamespaceOverviewContent}
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/vcf-automation" title="VCF Automation">
+      <VCFAutomationCCINamespaceDetails />
+    </EntityLayout.Route>
+  </EntityLayout>
+);
+
+const vcfAutomationCCIResourceOverviewContent = (
+  <Grid container spacing={3} alignItems="stretch">
+    <Grid item md={6}>
+      <EntityAboutCard variant="gridItem" />
+    </Grid>
+    <Grid item md={6}>
+      <VCFAutomationCCIResourceOverview />
+    </Grid>
+    <Grid item md={6} xs={12}>
+      <EntityCatalogGraphCard variant="gridItem" height={400} />
+    </Grid>
+    <Grid item md={4} xs={12}>
+      <EntityLinksCard />
+    </Grid>
+  </Grid>
+);
+
+const vcfAutomationCCIResourcePage = (
+  <EntityLayout>
+    <EntityLayout.Route path="/" title="Overview">
+      {vcfAutomationCCIResourceOverviewContent}
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/vcf-automation" title="VCF Automation">
+      <VCFAutomationCCIResourceDetails />
+    </EntityLayout.Route>
+  </EntityLayout>
+);
+
 const websiteEntityPage = (
   <EntityLayout>
     <EntityLayout.Route path="/" title="Overview">
@@ -433,6 +493,14 @@ const componentPage = (
 
     <EntitySwitch.Case if={isComponentType('Cloud.vSphere.Machine')}>
       {vcfAutomationVSphereVMPage}
+    </EntitySwitch.Case>
+
+    <EntitySwitch.Case if={isComponentType('CCI.Supervisor.Namespace')}>
+      {vcfAutomationCCINamespacePage}
+    </EntitySwitch.Case>
+
+    <EntitySwitch.Case if={isComponentType('CCI.Supervisor.Resource')}>
+      {vcfAutomationCCIResourcePage}
     </EntitySwitch.Case>
 
     <EntitySwitch.Case>{defaultEntityPage}</EntitySwitch.Case>

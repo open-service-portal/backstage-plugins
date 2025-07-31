@@ -1,6 +1,6 @@
 import { Config } from '@backstage/config';
 import { LoggerService } from '@backstage/backend-plugin-api';
-import fetch from 'node-fetch';
+import fetch, { RequestInit } from 'node-fetch';
 
 interface VcfAuthResponse {
   cspAuthToken: string;
@@ -21,6 +21,7 @@ interface VcfInstance {
     domain: string;
   };
   orgName?: string;
+  organizationType?: 'vm-apps' | 'all-apps';
   token?: string;
   tokenExpiry?: Date;
 }
@@ -51,6 +52,7 @@ export class VcfAutomationService {
               domain: instanceConfig.getOptionalString('authentication.domain') ?? "",
             },
             orgName: instanceConfig.getOptionalString('orgName'),
+            organizationType: instanceConfig.getOptionalString('organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
           };
         });
       } else {
@@ -67,6 +69,7 @@ export class VcfAutomationService {
             domain: auth.getString('domain'),
           },
           orgName: config.getOptionalString('vcfAutomation.orgName'),
+          organizationType: config.getOptionalString('vcfAutomation.organizationType') as 'vm-apps' | 'all-apps' ?? 'vm-apps',
         }];
       }
     } catch (error) {
@@ -163,18 +166,24 @@ export class VcfAutomationService {
     }
   }
 
-  private async makeAuthorizedRequest(path: string, instanceName?: string): Promise<any> {
+  private async makeAuthorizedRequest(path: string, instanceName?: string, options?: RequestInit): Promise<any> {
     const instance = instanceName 
       ? this.instances.find(i => i.name === instanceName) ?? this.defaultInstance
       : this.defaultInstance;
 
     try {
       await this.authenticate(instance);
-      const response = await fetch(`${instance.baseUrl}${path}`, {
+      // Prepare request options
+      const requestOptions: RequestInit = {
+        method: 'GET',
+        ...options,
         headers: {
           Authorization: `Bearer ${instance.token}`,
+          ...(options?.headers as Record<string, string> || {}),
         },
-      });
+      };
+
+      const response = await fetch(`${instance.baseUrl}${path}`, requestOptions);
 
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}: ${response.statusText}`);
@@ -234,10 +243,201 @@ export class VcfAutomationService {
   }
 
   async getProjectDetails(projectId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    const instance = instanceName 
+      ? this.instances.find(i => i.name === instanceName) ?? this.defaultInstance
+      : this.defaultInstance;
+
     try {
-      return await this.makeAuthorizedRequest(`/iaas/api/projects/${projectId}`, instanceName);
+      // Use different API endpoints based on organization type
+      const apiPath = instance.organizationType === 'all-apps' 
+        ? `/project-service/api/projects/${projectId}`
+        : `/iaas/api/projects/${projectId}`;
+      
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
     } catch (error) {
       this.logger.error(`Failed to get project details for ${projectId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getProjects(instanceName?: string): Promise<any | VcfErrorResponse> {
+    const instance = instanceName 
+      ? this.instances.find(i => i.name === instanceName) ?? this.defaultInstance
+      : this.defaultInstance;
+
+    try {
+      // Use different API endpoints based on organization type
+      const apiPath = instance.organizationType === 'all-apps' 
+        ? `/project-service/api/projects`
+        : `/iaas/api/projects`;
+      
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get projects list`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getDeployments(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // Deployment API endpoint is the same for both organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/deployments`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get deployments list`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getDeploymentResources(deploymentId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // Resources API endpoint is the same for both organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/deployments/${deploymentId}/resources`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get resources for deployment ${deploymentId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorResources(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/supervisor-resources`, instanceName);
+    } catch (error) {
+      this.logger.error('Failed to get supervisor resources', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorResource(resourceId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/deployment/api/supervisor-resources/${resourceId}`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor resource ${resourceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorNamespaces(instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces?limit=500`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor namespaces`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // This endpoint is only available for all-apps organization types
+      return await this.makeAuthorizedRequest(`/cci/kubernetes/apis/infrastructure.cci.vmware.com/v1alpha2/supervisornamespaces/${namespaceId}`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor namespace ${namespaceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  // VM Power Management for deployment-managed VMs
+  async checkVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      const actionId = `CCI.Supervisor.Resource.VirtualMachine.${action}`;
+      return await this.makeAuthorizedRequest(`/deployment/api/resources/${resourceId}/actions/${actionId}?apiVersion=2020-08-25`, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to check VM power action ${action} for resource ${resourceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      const actionId = `CCI.Supervisor.Resource.VirtualMachine.${action}`;
+      const body = { actionId };
+      
+      return await this.makeAuthorizedRequest(
+        `/deployment/api/resources/${resourceId}/requests?apiVersion=2020-08-25`,
+        instanceName,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Failed to execute VM power action ${action} for resource ${resourceId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  // VM Power Management for standalone VMs
+  async getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      const apiPath = `/proxy/k8s/namespaces/${namespaceUrnId}/apis/vmoperator.vmware.com/v1alpha3/namespaces/${namespaceName}/virtualmachines/${vmName}`;
+      this.logger.info(`Fetching standalone VM status for ${vmName}`, {
+        namespaceUrnId,
+        namespaceName,
+        vmName,
+        apiPath,
+        instanceName,
+      });
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get standalone VM status for ${vmName} in namespace ${namespaceName}`, {
+        namespaceUrnId,
+        namespaceName,
+        vmName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      // Update the power state in the VM data
+      const updatedVmData = {
+        ...vmData,
+        spec: {
+          ...vmData.spec,
+          powerState,
+        },
+      };
+
+      return await this.makeAuthorizedRequest(
+        `/proxy/k8s/namespaces/${namespaceUrnId}/apis/vmoperator.vmware.com/v1alpha3/namespaces/${namespaceName}/virtualmachines/${vmName}`,
+        instanceName,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(updatedVmData),
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Failed to execute standalone VM power action for ${vmName} in namespace ${namespaceName}`, {
         error: error instanceof Error ? error.message : String(error),
       });
       return { error: 'Service temporarily unavailable', status: 'error' };

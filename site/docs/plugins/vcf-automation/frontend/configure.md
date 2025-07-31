@@ -9,14 +9,18 @@ Add the following to your `app-config.yaml`:
 Single Instance:  
 ```yaml
 vcfAutomation:
+  name: my-vcf-01
   baseUrl: http://your-vcf-automation-service
+  majorVersion: 9 # 8 or 9 supported
+  orgName: my-org # Required for VCF 9
+  organizationType: 'all-apps' # Options: 'vm-apps' (default) or 'all-apps' for VCF 9
   # Enable permission checks
   enablePermissions: true
   # Auth details
   authentication:
     username: 'your-username'
     password: 'your-password'
-    domain: 'your-domain'
+    domain: 'your-domain' # Required for Aria Automation 8.x
 ```
 
 Multi Instance:  
@@ -33,11 +37,12 @@ vcfAutomation:
       domain: 'your-domain'
   - name: my-vcf-02
     baseUrl: 'https://your-vcf-02-automation-instance'
-    majorVersion: 8
+    majorVersion: 9
+    orgName: my-org # Required for VCF 9
+    organizationType: 'all-apps' # Options: 'vm-apps' (default) or 'all-apps' for VCF 9
     authentication:
       username: 'your-username'
       password: 'your-password'
-      domain: 'your-domain'
 ```  
   
 ## Links
@@ -63,7 +68,8 @@ vcfAutomation:
   - name: my-vcf-02
     baseUrl: 'https://your-vcf-02-automation-instance'
     majorVersion: 9
-    orgName: my-org # This is needed only in VCFA 9 and above
+    orgName: my-org # Required for VCF 9
+    organizationType: 'all-apps' # Options: 'vm-apps' (default) or 'all-apps' for VCF 9
     authentication:
       username: 'your-username'
       password: 'your-password'

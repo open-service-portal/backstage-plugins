@@ -134,7 +134,7 @@ export const VCFAutomationProjectDetails = () => {
               'Project Name': projectData.name,
               'Project ID': projectData.id,
               Description: projectData.description,
-              'Organization ID': projectData.organizationId,
+              'Organization ID': projectData.organizationId || projectData.orgId,
               'Operation Timeout': `${projectData.operationTimeout} seconds`,
               'Machine Naming Template': projectData.machineNamingTemplate || 'N/A',
               'Shared Resources': projectData.sharedResources ? 'Yes' : 'No',
@@ -178,51 +178,55 @@ export const VCFAutomationProjectDetails = () => {
       <Grid item xs={12}>
         <InfoCard title="Project Members">
           <Grid container spacing={3}>
-            {renderMemberTable(projectData.administrators, 'Administrators')}
-            {renderMemberTable(projectData.members, 'Members')}
-            {renderMemberTable(projectData.viewers, 'Viewers')}
-            {renderMemberTable(projectData.supervisors, 'Supervisors')}
+            {renderMemberTable(projectData.administrators || [], 'Administrators')}
+            {renderMemberTable(projectData.members || [], 'Members')}
+            {renderMemberTable(projectData.viewers || [], 'Viewers')}
+            {renderMemberTable(projectData.supervisors || [], 'Supervisors')}
+            {projectData.users && projectData.users.length > 0 && renderMemberTable(projectData.users, 'Users')}
+            {projectData.auditors && projectData.auditors.length > 0 && renderMemberTable(projectData.auditors, 'Auditors')}
           </Grid>
         </InfoCard>
       </Grid>
 
-      <Grid item xs={12}>
-        <InfoCard title="Project Zones">
-          <Table
-            columns={[
-              { title: 'Zone ID', field: 'zoneId' },
-              { title: 'Priority', field: 'priority' },
-              { 
-                title: 'Instances', 
-                field: 'instances',
-                render: (row: VcfProjectZone) => `${row.allocatedInstancesCount}/${row.maxNumberInstances || '∞'}`,
-              },
-              { 
-                title: 'Memory (MB)', 
-                field: 'memory',
-                render: (row: VcfProjectZone) => `${row.allocatedMemoryMB}/${row.memoryLimitMB || '∞'}`,
-              },
-              { 
-                title: 'CPU', 
-                field: 'cpu',
-                render: (row: VcfProjectZone) => `${row.allocatedCpu}/${row.cpuLimit || '∞'}`,
-              },
-              { 
-                title: 'Storage (GB)', 
-                field: 'storage',
-                render: (row: VcfProjectZone) => `${row.allocatedStorageGB}/${row.storageLimitGB || '∞'}`,
-              },
-            ]}
-            data={projectData.zones}
-            options={{
-              search: true,
-              paging: true,
-            }}
-          />
-        </InfoCard>
-      </Grid>
+      {projectData.zones && projectData.zones.length > 0 && (
+        <Grid item xs={12}>
+          <InfoCard title="Project Zones">
+            <Table
+              columns={[
+                { title: 'Zone ID', field: 'zoneId' },
+                { title: 'Priority', field: 'priority' },
+                { 
+                  title: 'Instances', 
+                  field: 'instances',
+                  render: (row: VcfProjectZone) => `${row.allocatedInstancesCount}/${row.maxNumberInstances || '∞'}`,
+                },
+                { 
+                  title: 'Memory (MB)', 
+                  field: 'memory',
+                  render: (row: VcfProjectZone) => `${row.allocatedMemoryMB}/${row.memoryLimitMB || '∞'}`,
+                },
+                { 
+                  title: 'CPU', 
+                  field: 'cpu',
+                  render: (row: VcfProjectZone) => `${row.allocatedCpu}/${row.cpuLimit || '∞'}`,
+                },
+                { 
+                  title: 'Storage (GB)', 
+                  field: 'storage',
+                  render: (row: VcfProjectZone) => `${row.allocatedStorageGB}/${row.storageLimitGB || '∞'}`,
+                },
+              ]}
+              data={projectData.zones}
+              options={{
+                search: true,
+                paging: true,
+              }}
+            />
+          </InfoCard>
+        </Grid>
+      )}
 
-      {Object.keys(projectData.constraints).length > 0 && (
+      {projectData.constraints && Object.keys(projectData.constraints).length > 0 && (
         <Grid item xs={12}>
           <InfoCard title="Constraints">
             <StructuredMetadataTable
@@ -232,11 +236,34 @@ export const VCFAutomationProjectDetails = () => {
         </Grid>
       )}
 
-      {Object.keys(projectData.customProperties).length > 0 && (
+      {projectData.customProperties && Object.keys(projectData.customProperties).length > 0 && (
         <Grid item xs={12}>
           <InfoCard title="Custom Properties">
             <StructuredMetadataTable
               metadata={projectData.customProperties}
+            />
+          </InfoCard>
+        </Grid>
+      )}
+
+      {projectData.properties && Object.keys(projectData.properties).length > 0 && (
+        <Grid item xs={12}>
+          <InfoCard title="Properties">
+            <StructuredMetadataTable
+              metadata={projectData.properties}
+            />
+          </InfoCard>
+        </Grid>
+      )}
+
+      {projectData.orgId && (
+        <Grid item xs={12}>
+          <InfoCard title="Organization Information">
+            <StructuredMetadataTable
+              metadata={{
+                'Organization ID': projectData.orgId,
+                'Operation Timeout': projectData.operationTimeout ? `${projectData.operationTimeout} minutes` : 'Not configured',
+              }}
             />
           </InfoCard>
         </Grid>

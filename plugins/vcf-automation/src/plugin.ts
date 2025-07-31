@@ -102,3 +102,39 @@ export const VcfAutomationGenericResourceOverview = vcfAutomationPlugin.provide(
     mountPoint: rootRouteRef,
   }),
 );
+
+export const VcfAutomationCCINamespaceOverview = vcfAutomationPlugin.provide(
+  createRoutableExtension({
+    name: 'VcfAutomationCCINamespaceOverview',
+    component: () =>
+      import('./components/VCFAutomationCCINamespaceOverview').then(m => m.VCFAutomationCCINamespaceOverview),
+    mountPoint: rootRouteRef,
+  }),
+);
+
+export const VcfAutomationCCINamespaceDetails = vcfAutomationPlugin.provide(
+  createRoutableExtension({
+    name: 'VcfAutomationCCINamespaceDetails',
+    component: () =>
+      import('./components/VCFAutomationCCINamespaceDetails').then(m => m.VCFAutomationCCINamespaceDetails),
+    mountPoint: rootRouteRef,
+  }),
+);
+
+export const VcfAutomationCCIResourceOverview = vcfAutomationPlugin.provide(
+  createRoutableExtension({
+    name: 'VcfAutomationCCIResourceOverview',
+    component: () =>
+      import('./components/VCFAutomationCCIResourceOverview').then(m => m.VCFAutomationCCIResourceOverview),
+    mountPoint: rootRouteRef,
+  }),
+);
+
+export const VcfAutomationCCIResourceDetails = vcfAutomationPlugin.provide(
+  createRoutableExtension({
+    name: 'VcfAutomationCCIResourceDetails',
+    component: () =>
+      import('./components/VCFAutomationCCIResourceDetails').then(m => m.VCFAutomationCCIResourceDetails),
+    mountPoint: rootRouteRef,
+  }),
+);
