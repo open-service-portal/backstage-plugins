@@ -20,5 +20,15 @@ export const showDeploymentResourcesDataPermission = createPermission({
   attributes: { action: 'read' },
 });
 
+export const vmPowerManagementPermission = createPermission({
+  name: 'vcf-automation.vm-power-management.run',
+  attributes: { action: 'update' },
+});
 
-export const vcfAutomationPermissions = [showDeploymentResourcesDataPermission, viewProjectDetailsPermission, viewDeploymentHistoryPermission, viewDeploymentsUserEventsPermission];
+export const vcfAutomationPermissions = [
+  showDeploymentResourcesDataPermission, 
+  viewProjectDetailsPermission, 
+  viewDeploymentHistoryPermission, 
+  viewDeploymentsUserEventsPermission,
+  vmPowerManagementPermission
+];
