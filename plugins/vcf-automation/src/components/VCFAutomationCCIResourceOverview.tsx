@@ -17,6 +17,7 @@ import { makeStyles } from '@material-ui/core/styles';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import yaml from 'js-yaml';
 import useAsync from 'react-use/lib/useAsync';
+import { VCFAutomationVMPowerManagement } from './VCFAutomationVMPowerManagement';
 
 const useStyles = makeStyles(theme => ({
   statusChip: {
@@ -52,6 +53,10 @@ export const VCFAutomationCCIResourceOverview = () => {
 
   // Check if this is a standalone resource
   const isStandalone = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-resource-origin'] === 'STANDALONE';
+  
+  // Get VM organization type from entity tags
+  const vmOrganizationType = entity.metadata.annotations?.['terasky.backstage.io/vcf-automation-version'] === '9' && 
+    entity.metadata.tags?.some((tag: string) => tag.startsWith('vcf-automation:')) ? 'all-apps' : 'vm-apps';
 
   // Parse annotation data once using useMemo
   const annotationData = useMemo(() => {
@@ -145,6 +150,32 @@ export const VCFAutomationCCIResourceOverview = () => {
   const manifest = annotationData.manifest || apiResourceData?.properties?.manifest;
   const objectData = annotationData.objectData || apiResourceData?.properties?.object;
   const resourceContext = annotationData.resourceContext || apiResourceData?.properties?.context;
+
+  // Extract VM-specific information for power management
+  const resourceKind = manifest?.kind || objectData?.kind;
+  const vmName = manifest?.metadata?.name || objectData?.metadata?.name;
+  const namespaceName = manifest?.metadata?.namespace || objectData?.metadata?.namespace;
+  
+  // For standalone VMs, we need the namespace URN ID from the supervisor namespace
+  // This is stored in the resource context during ingestion
+  const namespaceUrnId = useMemo(() => {
+    if (!isStandalone || !namespaceName) return undefined;
+    
+    // Extract the URN ID from the resource context (stored during ingestion)
+    const contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
+    const urnId = contextData?.namespaceUrnId || namespaceName; // Fallback to namespace name if URN not available
+    
+    // Debug logging to help troubleshoot
+    console.log('Debug - Standalone VM URN ID resolution:', {
+      namespaceName,
+      resourceContext,
+      contextData,
+      urnId,
+      isStandalone,
+    });
+    
+    return urnId;
+  }, [isStandalone, namespaceName, resourceContext]);
 
   if (loading) {
     return (
@@ -267,6 +298,24 @@ export const VCFAutomationCCIResourceOverview = () => {
           </Typography>
           <StructuredMetadataTable metadata={basicInfo} />
         </Grid>
+
+        {/* VM Power Management for VirtualMachine resources in all-apps organizations */}
+        {vmOrganizationType === 'all-apps' && resourceKind === 'VirtualMachine' && (
+          <Grid item xs={12}>
+            <Typography variant="h6" className={classes.sectionTitle}>
+              Power Management
+            </Typography>
+            <VCFAutomationVMPowerManagement
+              entity={entity}
+              resourceId={resourceId}
+              instanceName={instanceName}
+              isStandalone={isStandalone}
+              vmName={isStandalone ? vmName : undefined}
+              namespaceName={isStandalone ? namespaceName : undefined}
+              namespaceUrnId={isStandalone ? namespaceUrnId : undefined}
+            />
+          </Grid>
+        )}
 
         {entity.spec?.dependsOn && Array.isArray(entity.spec.dependsOn) && entity.spec.dependsOn.length > 0 && (
           <Grid item xs={12}>

@@ -258,4 +258,55 @@ export interface StandaloneSupervisorResource {
   };
   spec: any;
   status: any;
-} 
+}
+
+// VM Power Management Types
+export interface VmPowerAction {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  dependents: string[];
+  valid: boolean;
+  actionType: string;
+}
+
+export interface VmPowerActionRequest {
+  actionId: string;
+}
+
+export interface StandaloneVmStatus {
+  apiVersion: string;
+  kind: string;
+  metadata: {
+    name: string;
+    namespace: string;
+    annotations?: { [key: string]: string };
+    labels?: { [key: string]: string };
+    creationTimestamp: string;
+    uid: string;
+    resourceVersion: string;
+  };
+  spec: {
+    powerState: 'PoweredOn' | 'PoweredOff';
+    className: string;
+    imageName: string;
+    network?: any;
+    bootstrap?: any;
+    [key: string]: any;
+  };
+  status: {
+    powerState: 'PoweredOn' | 'PoweredOff';
+    conditions: Array<{
+      type: string;
+      status: string;
+      lastTransitionTime: string;
+      reason?: string;
+      message?: string;
+    }>;
+    [key: string]: any;
+  };
+}
+
+export type VmPowerState = 'PoweredOn' | 'PoweredOff';
+export type VmPowerActionType = 'PowerOn' | 'PowerOff'; 

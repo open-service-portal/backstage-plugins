@@ -11,6 +11,7 @@ export { VCFAutomationCCINamespaceOverview } from './components/VCFAutomationCCI
 export { VCFAutomationCCIResourceOverview } from './components/VCFAutomationCCIResourceOverview';
 export { VCFAutomationCCINamespaceDetails } from './components/VCFAutomationCCINamespaceDetails';
 export { VCFAutomationCCIResourceDetails } from './components/VCFAutomationCCIResourceDetails';
+export { VCFAutomationVMPowerManagement } from './components/VCFAutomationVMPowerManagement';
 
 // API exports
 export { vcfAutomationApiRef, VcfAutomationClient } from './api/VcfAutomationClient';
@@ -35,4 +36,9 @@ export type {
   VcfProject,
   CciSupervisorNamespace,
   CciSupervisorResource,
+  VmPowerAction,
+  VmPowerActionRequest,
+  StandaloneVmStatus,
+  VmPowerState,
+  VmPowerActionType,
 } from './types';

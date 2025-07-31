@@ -133,6 +133,11 @@ export interface VcfAutomationApi {
   getSupervisorResource(resourceId: string, instanceName?: string): Promise<any>;
   getSupervisorNamespaces(instanceName?: string): Promise<any>;
   getSupervisorNamespace(namespaceId: string, instanceName?: string): Promise<any>;
+  // VM Power Management
+  checkVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any>;
+  executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any>;
+  getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any>;
+  executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any>;
 }
 
 export const vcfAutomationApiRef = createApiRef<VcfAutomationApi>({
@@ -350,6 +355,78 @@ export class VcfAutomationClient implements VcfAutomationApi {
     });
     if (!response.ok) {
       throw new Error(`Failed to fetch supervisor namespace: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // VM Power Management for deployment-managed VMs
+  async checkVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/resources/${resourceId}/power-actions/${action}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/resources/${resourceId}/power-actions/${action}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to check VM power action: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/resources/${resourceId}/power-actions/${action}?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/resources/${resourceId}/power-actions/${action}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to execute VM power action: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // VM Power Management for standalone VMs
+  async getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/status?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/status`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to get standalone VM status: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const url = instanceName
+      ? `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/power-state?instance=${encodeURIComponent(instanceName)}`
+      : `${baseUrl}/standalone-vms/${namespaceUrnId}/${namespaceName}/${vmName}/power-state`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ powerState, vmData }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to execute standalone VM power action: ${response.statusText}`);
     }
     return await response.json();
   }
