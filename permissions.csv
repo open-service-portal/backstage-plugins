@@ -2,6 +2,7 @@ p, role:default/platformteam, vcf-automation.deployments-user-events.view, read,
 p, role:default/platformteam, vcf-automation.project-details.view, read, allow
 p, role:default/platformteam, vcf-automation.deployments-history.view, read, allow
 p, role:default/platformteam, vcf-automation.resources.view, read, allow
+p, role:default/platformteam, vcf-automation.vm-power-management.run, update, allow
 p, role:default/platformteam, catalog.entity.create, create, allow
 p, role:default/platformteam, catalog-entity, delete, allow
 p, role:default/platformteam, catalog-entity, read, allow
