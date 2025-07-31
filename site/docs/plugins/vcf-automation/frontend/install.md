@@ -256,12 +256,47 @@ The VCF Automation frontend plugin now provides the following components:
 ### CCI Components (New)
 - `VCFAutomationCCINamespaceOverview` & `VCFAutomationCCINamespaceDetails` - For CCI Supervisor Namespaces
 - `VCFAutomationCCIResourceOverview` & `VCFAutomationCCIResourceDetails` - For CCI Supervisor Resources
+- `VCFAutomationVMPowerManagement` - For VM power management (automatically included in CCI resource overview for VMs)
 
 ### Entity Type Mappings
 - **CCI.Supervisor.Namespace** → Uses CCI Namespace components
 - **CCI.Supervisor.Resource** → Uses CCI Resource components  
 - **Cloud.vSphere.Machine** → Uses vSphere VM components
 - **Other types** → Uses generic resource components
+
+## VM Power Management
+
+For VirtualMachine components in all-apps organizations, the plugin provides power management capabilities:
+
+### Features
+
+- **Power State Display**: Shows current VM power state (PoweredOn/PoweredOff)
+- **Power Actions**: Power On/Off buttons based on current state  
+- **Permission Control**: Requires `vcf-automation.vm-power-management.run` permission (defined in vcf-automation-common)
+- **Confirmation Dialogs**: Confirms actions before execution
+- **Support for Both VM Types**:
+  - **Deployment-managed VMs**: Uses deployment API to check action validity and execute
+  - **Standalone VMs**: Uses Kubernetes API to check status and update power state
+
+### Permissions
+
+Add the following permission to your permission policy:
+
+```typescript
+import { vmPowerManagementPermission } from '@terasky/backstage-plugin-vcf-automation-common';
+
+// In your permission policy:
+{
+  permission: vmPowerManagementPermission,
+  result: AuthorizeResult.ALLOW, // or implement conditional logic as needed
+}
+```
+
+The permission is defined in the `vcf-automation-common` plugin and automatically registered with the permission system.
+
+### Usage
+
+The power management component is automatically included in `VCFAutomationCCIResourceOverview` for VirtualMachine entities in all-apps organizations. No additional configuration is required.
 
 ## What's Next?
 

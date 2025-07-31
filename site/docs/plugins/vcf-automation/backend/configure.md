@@ -57,6 +57,12 @@ The plugin exposes the following endpoints:
 - `GET /api/vcf-automation/supervisor-resources/:id` - Get specific supervisor resource details
 - `GET /api/vcf-automation/supervisor-namespaces` - List all supervisor namespaces
 - `GET /api/vcf-automation/supervisor-namespaces/:id` - Get specific supervisor namespace details
+- `GET /api/vcf-automation/resources/:resourceId/power-actions/:action` - Check VM power action validity (deployment-managed)
+- `POST /api/vcf-automation/resources/:resourceId/power-actions/:action` - Execute VM power action (deployment-managed)
+- `GET /api/vcf-automation/standalone-vms/:namespaceUrnId/:namespaceName/:vmName/status` - Get standalone VM status
+- `PUT /api/vcf-automation/standalone-vms/:namespaceUrnId/:namespaceName/:vmName/power-state` - Update standalone VM power state
+
+**Note**: VM power management requires the `vcf-automation.vm-power-management.run` permission, which is defined in the `vcf-automation-common` plugin.
 
 ## Links
 

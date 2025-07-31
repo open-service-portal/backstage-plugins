@@ -139,6 +139,7 @@ For **all-apps** organization types, the ingestor provides enhanced support for 
   - **Cluster**: Links to TKG service view
   - **Other types**: No external link (still ingested)
 - **Smart Tagging**: All CCI resources from all-apps organizations get tagged with `kind:<RESOURCE_KIND>` (e.g., `kind:virtualmachine`, `kind:service`, `kind:cluster`)
+- **Remote Console Links**: VirtualMachine components get remote console links with format `/automation/#/machines/remote-console/<PROJECT>/<NAMESPACE>/<VM>`
 - Annotations include:
   - `terasky.backstage.io/vcf-automation-cci-resource-manifest` (JSON)
   - `terasky.backstage.io/vcf-automation-cci-resource-object` (JSON)
