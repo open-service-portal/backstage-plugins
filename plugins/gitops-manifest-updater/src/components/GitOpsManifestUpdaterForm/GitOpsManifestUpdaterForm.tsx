@@ -39,6 +39,9 @@ type SchemaProperty = {
   format?: string;
   enum?: any[];
   additionalProperties?: any;
+  'ui:widget'?: string;
+  'ui:options'?: any;
+  'x-kubernetes-preserve-unknown-fields'?: boolean;
 };
 
 const crossplaneFields = [
@@ -109,6 +112,45 @@ const RenderField = ({
   fullPath: string;
   onChange: (path: string, value: any) => void;
 }) => {
+  // Handle fields with x-kubernetes-preserve-unknown-fields: true that don't have a type
+  if (prop['x-kubernetes-preserve-unknown-fields'] === true && !prop.type) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginTop: '8px', marginBottom: '4px' }}>
+        <Typography variant="body1" style={{ minWidth: '150px', marginTop: '8px' }}>{label}:</Typography>
+        <TextField
+          helperText={prop.description}
+          value={value === undefined ? '' : value.toString()}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(fullPath, e.target.value)}
+          fullWidth
+          margin="dense"
+          multiline
+          rows={10}
+          style={{ flexGrow: 1 }}
+        />
+      </div>
+    );
+  }
+  
+  // Handle fields with ui:widget set to textarea
+  if (prop['ui:widget'] === 'textarea') {
+    const rows = prop['ui:options']?.rows || 10;
+    return (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginTop: '8px', marginBottom: '4px' }}>
+        <Typography variant="body1" style={{ minWidth: '150px', marginTop: '8px' }}>{label}:</Typography>
+        <TextField
+          helperText={prop.description}
+          value={value === undefined ? '' : value.toString()}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(fullPath, e.target.value)}
+          fullWidth
+          margin="dense"
+          multiline
+          rows={rows}
+          style={{ flexGrow: 1 }}
+        />
+      </div>
+    );
+  }
+
   // Render map fields (object with additionalProperties and no properties)
   if (
     prop.type === 'object' &&

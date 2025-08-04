@@ -554,7 +554,18 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       const processedProperties: Record<string, any> = {};
       for (const [key, value] of Object.entries(properties)) {
         const typedValue = value as Record<string, any>;
-        if (typedValue.type === 'object' && typedValue.properties) {
+        
+        // Handle fields with x-kubernetes-preserve-unknown-fields: true
+        if (typedValue['x-kubernetes-preserve-unknown-fields'] === true && !typedValue.type) {
+          processedProperties[key] = {
+            ...typedValue,
+            type: 'string',
+            'ui:widget': 'textarea',
+            'ui:options': {
+              rows: 10,
+            },
+          };
+        } else if (typedValue.type === 'object' && typedValue.properties) {
           const subProperties = processProperties(typedValue.properties);
           processedProperties[key] = { ...typedValue, properties: subProperties };
           if (typedValue.properties.enabled && typedValue.properties.enabled.type === 'boolean') {
@@ -1551,7 +1562,19 @@ export class XRDTemplateEntityProvider implements EntityProvider {
 
       for (const [key, value] of Object.entries(properties)) {
         const typedValue = value as Record<string, any>;
-        if (typedValue.type === 'object' && typedValue.properties) {
+        
+        // Handle fields with x-kubernetes-preserve-unknown-fields: true
+        if (typedValue['x-kubernetes-preserve-unknown-fields'] === true && !typedValue.type) {
+          const { required: _, ...restValue } = typedValue;
+          processedProperties[key] = {
+            ...restValue,
+            type: 'string',
+            'ui:widget': 'textarea',
+            'ui:options': {
+              rows: 10,
+            },
+          };
+        } else if (typedValue.type === 'object' && typedValue.properties) {
           const subProperties = processProperties(typedValue.properties);
           // Remove required fields for nested objects
           const { required: _, ...restValue } = typedValue;
