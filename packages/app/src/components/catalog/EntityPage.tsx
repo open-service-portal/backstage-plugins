@@ -94,6 +94,7 @@ import {
   VCFAutomationCCIResourceDetails,
 } from '@terasky/backstage-plugin-vcf-automation';
 import { AIRulesComponent } from '@terasky/backstage-plugin-ai-rules';
+import { VCFOperationsExplorerComponent } from '@terasky/backstage-plugin-vcf-operations';
 
 const techdocsContent = (
   <EntityTechdocsContent>
@@ -423,6 +424,9 @@ const vcfAutomationCCIResourcePage = (
     </EntityLayout.Route>
     <EntityLayout.Route path="/vcf-automation" title="VCF Automation">
       <VCFAutomationCCIResourceDetails />
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/vcf-operations" title="VCF Operations">
+      <VCFOperationsExplorerComponent />
     </EntityLayout.Route>
   </EntityLayout>
 );
