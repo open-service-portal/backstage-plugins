@@ -22,7 +22,7 @@ Welcome to our comprehensive collection of Backstage plugins! We've created thes
 
 ### Cloud Infrastructure
 1. [VCF Automation Suite](./plugins/vcf-automation/overview.md) [![npm latest version](https://img.shields.io/npm/v/@terasky/backstage-plugin-vcf-automation/latest.svg)](https://www.npmjs.com/package/@terasky/backstage-plugin-vcf-automation) - Comprehensive VMware Cloud Foundation Automation integration.
-2. [VCF Operations Suite](./plugins/vcf-operations/overview.md) [![npm latest version](https://img.shields.io/npm/v/@terasky/backstage-plugin-vcf-automation/latest.svg)](https://www.npmjs.com/package/@terasky/backstage-plugin-vcf-operations) - Comprehensive VMware Cloud Foundation Operations observability integration.
+2. [VCF Operations Suite](./plugins/vcf-operations/overview.md) [![npm latest version](https://img.shields.io/npm/v/@terasky/backstage-plugin-vcf-operations/latest.svg)](https://www.npmjs.com/package/@terasky/backstage-plugin-vcf-operations) - Comprehensive VMware Cloud Foundation Operations observability integration.
 
 ### AI
 1. [AI Coding Rules](./plugins/ai-rules-plugin/overview.md) [![npm latest version](https://img.shields.io/npm/v/@terasky/backstage-plugin-ai-rules/latest.svg)](https://www.npmjs.com/package/@terasky/backstage-plugin-ai-rules) - Comprehensive visualization and management of AI coding rules from Cursor, GitHub Copilot, and Cline.
