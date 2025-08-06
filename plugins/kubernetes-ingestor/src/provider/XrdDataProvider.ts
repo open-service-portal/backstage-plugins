@@ -142,7 +142,7 @@ export class XrdDataProvider {
             },
             {
               group: 'apiextensions.crossplane.io',
-              apiVersion: 'v2alpha1',
+              apiVersion: 'v2',
               plural: 'compositeresourcedefinitions',
               objectType: 'customresources' as KubernetesObjectTypes,
             },
@@ -215,8 +215,8 @@ export class XrdDataProvider {
                 return false;
               }
 
-              // Only require claimNames.kind for v1 and v2alpha1-LegacyCluster XRDs
-              const isV2 = resource.apiVersion === 'apiextensions.crossplane.io/v2alpha1';
+              // Only require claimNames.kind for v1 and v2-LegacyCluster XRDs
+              const isV2 = resource.apiVersion === 'apiextensions.crossplane.io/v2';
               const scope = resource.spec?.scope || (isV2 ? 'Namespaced' : 'Cluster');
               const isLegacyCluster = isV2 && scope === 'LegacyCluster';
 
