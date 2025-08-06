@@ -86,6 +86,16 @@ nav:
               - About: plugins/vcf-automation/ingestor/about.md
               - Install: plugins/vcf-automation/ingestor/install.md
               - Configure: plugins/vcf-automation/ingestor/configure.md
+      - VCF Operations:
+          - Overview: plugins/vcf-operations/overview.md
+          - Backend:
+              - About: plugins/vcf-operations/backend/about.md
+              - Install: plugins/vcf-operations/backend/install.md
+              - Configure: plugins/vcf-operations/backend/configure.md
+          - Frontend:
+              - About: plugins/vcf-operations/frontend/about.md
+              - Install: plugins/vcf-operations/frontend/install.md
+              - Configure: plugins/vcf-operations/frontend/configure.md
   - AI:
       - AI Coding Rules:
           - Overview: plugins/ai-rules-plugin/overview.md
