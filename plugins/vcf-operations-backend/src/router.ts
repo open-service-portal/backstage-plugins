@@ -1,18 +1,21 @@
 import { Config } from '@backstage/config';
 import express from 'express';
-import { LoggerService, PermissionsService } from '@backstage/backend-plugin-api';
+import { LoggerService, PermissionsService, HttpAuthService } from '@backstage/backend-plugin-api';
+import { AuthorizeResult } from '@backstage/plugin-permission-common';
+import { viewMetricsPermission } from '@terasky/backstage-plugin-vcf-operations-common';
 import { VcfOperationsService } from './services/VcfOperationsService';
 
 export interface RouterOptions {
   logger: LoggerService;
   config: Config;
   permissions: PermissionsService;
+  httpAuth: HttpAuthService;
 }
 
 export async function createRouter(
   options: RouterOptions,
 ): Promise<express.Router> {
-  const { logger, config } = options;
+  const { logger, config, permissions, httpAuth } = options;
 
   // eslint-disable-next-line new-cap
   const router = express.Router();
@@ -20,12 +23,37 @@ export async function createRouter(
 
   const vcfOperationsService = new VcfOperationsService(config, logger);
 
+  // Helper function to check permissions
+  const checkPermission = async (req: express.Request, res: express.Response): Promise<boolean> => {
+    try {
+      const credentials = await httpAuth.credentials(req, { allow: ['user'] });
+      const decision = await permissions.authorize(
+        [{ permission: viewMetricsPermission }],
+        { credentials }
+      );
+
+      if (decision[0].result !== AuthorizeResult.ALLOW) {
+        res.status(403).json({ 
+          error: 'Access denied. You do not have permission to view VCF Operations metrics.' 
+        });
+        return false;
+      }
+      return true;
+    } catch (error) {
+      logger.error('Error checking permissions', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Permission check failed' });
+      return false;
+    }
+  };
+
   router.get('/health', (_, response) => {
     response.json({ status: 'ok' });
   });
 
   // Get VCF Operations instances
-  router.get('/instances', async (_req, res) => {
+  router.get('/instances', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const instances = vcfOperationsService.getInstances();
       res.json(instances);
@@ -37,6 +65,8 @@ export async function createRouter(
 
   // Get metrics for a specific resource
   router.get('/resources/:resourceId/metrics', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { resourceId } = req.params;
       const { statKeys, begin, end, rollUpType, instance } = req.query;
@@ -87,6 +117,8 @@ export async function createRouter(
 
   // Query metrics for multiple resources
   router.post('/metrics/query', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { instance } = req.query;
       const queryRequest = req.body;
@@ -112,6 +144,8 @@ export async function createRouter(
 
   // Get latest metrics for resources
   router.get('/metrics/latest', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { resourceIds, statKeys, instance } = req.query;
       
@@ -140,6 +174,8 @@ export async function createRouter(
 
   // Find resource by property (must come before /:resourceId route)
   router.get('/resources/find-by-property', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { propertyKey, propertyValue, instance } = req.query;
       
@@ -165,6 +201,8 @@ export async function createRouter(
 
   // Find resource by name (must come before /:resourceId route)
   router.get('/resources/find-by-name', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { resourceName, instance, resourceType } = req.query;
       
@@ -180,6 +218,7 @@ export async function createRouter(
       const resource = await vcfOperationsService.findResourceByName(
         resourceName as string,
         instance as string,
+        resourceType as string,
       );
       
       if (resource) {
@@ -214,6 +253,8 @@ export async function createRouter(
 
   // Query resources with advanced filters
   router.post('/resources/query', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { instance } = req.query;
       const queryRequest = req.body;
@@ -232,6 +273,8 @@ export async function createRouter(
 
   // Get available metrics for a resource
   router.get('/resources/:resourceId/available-metrics', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { resourceId } = req.params;
       const { instance } = req.query;
@@ -250,6 +293,8 @@ export async function createRouter(
 
   // Get resource details (must come after specific routes)
   router.get('/resources/:resourceId', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { resourceId } = req.params;
       const { instance } = req.query;
@@ -266,8 +311,32 @@ export async function createRouter(
     }
   });
 
+  // Query project resources using VCF Operations query format
+  router.post('/resources/query-projects', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
+    try {
+      const { instance } = req.query;
+      const queryRequest = req.body;
+      
+      logger.info(`Querying project resources with request:`, queryRequest);
+      
+      const result = await vcfOperationsService.queryProjectResources(
+        queryRequest,
+        instance as string,
+      );
+      
+      res.json(result);
+    } catch (error) {
+      logger.error('Error querying project resources', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to query project resources' });
+    }
+  });
+
   // Search resources (must come last as it's the most general)
   router.get('/resources', async (req, res) => {
+    if (!(await checkPermission(req, res))) return;
+    
     try {
       const { name, adapterKind, resourceKind, instance } = req.query;
       

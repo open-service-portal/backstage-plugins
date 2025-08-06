@@ -1,6 +1,18 @@
 import { DiscoveryApi, FetchApi } from '@backstage/core-plugin-api';
 import { createApiRef } from '@backstage/core-plugin-api';
 
+export class VcfOperationsApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public statusText: string,
+    public details?: any,
+  ) {
+    super(message);
+    this.name = 'VcfOperationsApiError';
+  }
+}
+
 export interface MetricQueryRequest {
   resourceIds: string[];
   statKeys: string[];
@@ -104,6 +116,7 @@ export interface VcfOperationsApi {
   findResourceByName(
     resourceName: string,
     instance?: string,
+    resourceType?: string,
   ): Promise<Resource | null>;
 }
 
@@ -132,7 +145,25 @@ export class VcfOperationsClient implements VcfOperationsApi {
     const response = await this.fetchApi.fetch(`${baseUrl}/instances`);
     
     if (!response.ok) {
-      throw new Error(`Failed to get instances: ${response.statusText}`);
+      let errorMessage = `Failed to get instances: ${response.statusText}`;
+      let details: any;
+      
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+          details = errorData.details;
+        }
+      } catch {
+        // If response body is not JSON, use status text
+      }
+      
+      throw new VcfOperationsApiError(
+        errorMessage,
+        response.status,
+        response.statusText,
+        details,
+      );
     }
     
     return response.json();
@@ -290,7 +321,25 @@ export class VcfOperationsClient implements VcfOperationsApi {
     const response = await this.fetchApi.fetch(url);
     
     if (!response.ok) {
-      throw new Error(`Failed to find resource by property: ${response.statusText}`);
+      let errorMessage = `Failed to find resource by property: ${response.statusText}`;
+      let details: any;
+      
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+          details = errorData.details;
+        }
+      } catch {
+        // If response body is not JSON, use status text
+      }
+      
+      throw new VcfOperationsApiError(
+        errorMessage,
+        response.status,
+        response.statusText,
+        details,
+      );
     }
     
     return response.json();
@@ -299,18 +348,38 @@ export class VcfOperationsClient implements VcfOperationsApi {
   async findResourceByName(
     resourceName: string,
     instance?: string,
+    resourceType?: string,
   ): Promise<Resource | null> {
     const baseUrl = await this.getBaseUrl();
     const params = new URLSearchParams();
     
     params.append('resourceName', resourceName);
     if (instance) params.append('instance', instance);
+    if (resourceType) params.append('resourceType', resourceType);
     
     const url = `${baseUrl}/resources/find-by-name?${params.toString()}`;
     const response = await this.fetchApi.fetch(url);
     
     if (!response.ok) {
-      throw new Error(`Failed to find resource by name: ${response.statusText}`);
+      let errorMessage = `Failed to find resource by name: ${response.statusText}`;
+      let details: any;
+      
+      try {
+        const errorData = await response.json();
+        if (errorData.error) {
+          errorMessage = errorData.error;
+          details = errorData.details;
+        }
+      } catch {
+        // If response body is not JSON, use status text
+      }
+      
+      throw new VcfOperationsApiError(
+        errorMessage,
+        response.status,
+        response.statusText,
+        details,
+      );
     }
     
     return response.json();

@@ -14,12 +14,15 @@ import {
   FormControlLabel,
   Checkbox,
   Button,
+  IconButton,
+  Collapse,
 } from '@material-ui/core';
+import { ExpandMore, ChevronRight } from '@material-ui/icons';
 import { Alert } from '@material-ui/lab';
 import { makeStyles } from '@material-ui/core/styles';
 import { useApi } from '@backstage/core-plugin-api';
 import { useEntity } from '@backstage/plugin-catalog-react';
-import { vcfOperationsApiRef, MetricData, Resource } from '../api/VcfOperationsClient';
+import { vcfOperationsApiRef, MetricData, Resource, VcfOperationsApiError } from '../api/VcfOperationsClient';
 import { MetricChart } from './MetricChart';
 import { NotImplementedMessage } from './NotImplementedMessage';
 
@@ -174,7 +177,8 @@ interface MetricCategory {
   metrics: MetricSelection[];
 }
 
-const METRIC_CATEGORIES: MetricCategory[] = [
+// Virtual Machine Metrics (kind:virtualmachine)
+const VM_METRIC_CATEGORIES: MetricCategory[] = [
   {
     name: 'CPU Metrics',
     metrics: [
@@ -245,8 +249,224 @@ const METRIC_CATEGORIES: MetricCategory[] = [
   },
 ];
 
-// Flatten all metrics for easy access
-const ALL_METRICS: MetricSelection[] = METRIC_CATEGORIES.flatMap(category => category.metrics);
+// Supervisor Namespace Metrics (kind:supervisornamespace)
+const SUPERVISOR_NAMESPACE_METRIC_CATEGORIES: MetricCategory[] = [
+  {
+    name: 'System Health & Compliance',
+    metrics: [
+      { key: 'badge|compliance', label: 'Compliance Badge' },
+      { key: 'badge|efficiency', label: 'Efficiency Badge' },
+      { key: 'badge|health', label: 'Health Badge' },
+      { key: 'badge|risk', label: 'Risk Badge' },
+      { key: 'System Attributes|health', label: 'Health Score' },
+      { key: 'System Attributes|availability', label: 'Availability' },
+    ],
+  },
+  {
+    name: 'Hardware Configuration',
+    metrics: [
+      { key: 'config|hardware|num_Cpu', label: 'Number of CPUs' },
+    ],
+  },
+  {
+    name: 'CPU Metrics',
+    metrics: [
+      { key: 'cpu|effective_usagemhz_average', label: 'Effective Usage (MHz)' },
+      { key: 'cpu|usagemhz_average', label: 'Usage (MHz)' },
+    ],
+  },
+  {
+    name: 'Memory Metrics',
+    metrics: [
+      { key: 'mem|consumed_average', label: 'Consumed (KB)' },
+      { key: 'mem|effective_consumed_average', label: 'Effective Consumed (KB)' },
+    ],
+  },
+  {
+    name: 'Configuration & Status',
+    metrics: [
+      { key: 'summary|configStatus', label: 'Configuration Status' },
+    ],
+  },
+  {
+    name: 'Pods & Virtual Machines',
+    metrics: [
+      { key: 'summary|total_number_pods', label: 'Total Number of Pods' },
+      { key: 'summary|number_running_vms', label: 'Number of Running VMs' },
+      { key: 'summary|total_number_vms', label: 'Total Number of VMs' },
+    ],
+  },
+  {
+    name: 'System Attributes & Alerts',
+    metrics: [
+      { key: 'System Attributes|alert_count_critical', label: 'Critical Alerts' },
+      { key: 'System Attributes|alert_count_immediate', label: 'Immediate Alerts' },
+      { key: 'System Attributes|alert_count_info', label: 'Info Alerts' },
+      { key: 'System Attributes|alert_count_warning', label: 'Warning Alerts' },
+      { key: 'System Attributes|self_alert_count', label: 'Self Alert Count' },
+      { key: 'System Attributes|child_all_metrics', label: 'Child All Metrics' },
+      { key: 'System Attributes|all_metrics', label: 'All Metrics' },
+      { key: 'System Attributes|total_alert_count', label: 'Total Alert Count' },
+      { key: 'System Attributes|total_alarms', label: 'Total Alarms' },
+    ],
+  },
+];
+
+// VCF Automation Project Metrics (entityType === 'vcf-automation-project')
+const PROJECT_METRIC_CATEGORIES: MetricCategory[] = [
+  {
+    name: 'System Health & Compliance',
+    metrics: [
+      { key: 'badge|compliance', label: 'Compliance Badge' },
+      { key: 'badge|efficiency', label: 'Efficiency Badge' },
+      { key: 'badge|health', label: 'Health Badge' },
+      { key: 'badge|risk', label: 'Risk Badge' },
+      { key: 'System Attributes|health', label: 'Health Score' },
+      { key: 'System Attributes|availability', label: 'Availability' },
+    ],
+  },
+  {
+    name: 'Cost Metrics',
+    metrics: [
+      { key: 'cost|aggregatedMtdAdditionalCost', label: 'MTD Additional Cost' },
+      { key: 'cost|aggregatedMtdCpuCost', label: 'MTD CPU Cost' },
+      { key: 'cost|aggregatedMtdMemoryCost', label: 'MTD Memory Cost' },
+      { key: 'cost|aggregatedMtdStorageCost', label: 'MTD Storage Cost' },
+      { key: 'cost|aggregatedMtdTotalCost', label: 'MTD Total Cost' },
+      { key: 'cost|totalAdditionalCost', label: 'Total Additional Cost' },
+      { key: 'cost|totalCpuCost', label: 'Total CPU Cost' },
+      { key: 'cost|totalMemoryCost', label: 'Total Memory Cost' },
+      { key: 'cost|storageCost', label: 'Storage Cost' },
+    ],
+  },
+  {
+    name: 'Resource Usage',
+    metrics: [
+      { key: 'cpu|reservation', label: 'CPU Reservation' },
+      { key: 'cpu|usagemhz_average', label: 'CPU Usage (MHz)' },
+      { key: 'mem|reservation', label: 'Memory Reservation' },
+      { key: 'mem|usage_average', label: 'Memory Usage (%)' },
+      { key: 'diskspace|total_usage', label: 'Total Disk Usage' },
+    ],
+  },
+  {
+    name: 'System Attributes & Alerts',
+    metrics: [
+      { key: 'System Attributes|alert_count_immediate', label: 'Immediate Alerts' },
+      { key: 'System Attributes|alert_count_info', label: 'Info Alerts' },
+      { key: 'System Attributes|alert_count_warning', label: 'Warning Alerts' },
+      { key: 'System Attributes|child_all_metrics', label: 'Child All Metrics' },
+      { key: 'System Attributes|self_alert_count', label: 'Self Alert Count' },
+      { key: 'System Attributes|all_metrics', label: 'All Metrics' },
+      { key: 'System Attributes|total_alert_count', label: 'Total Alert Count' },
+      { key: 'System Attributes|total_alarms', label: 'Total Alarms' },
+    ],
+  },
+  {
+    name: 'Metering & Billing',
+    metrics: [
+      { key: 'summary|metering|additional', label: 'Additional Price' },
+      { key: 'summary|metering|cpu', label: 'CPU Price' },
+      { key: 'summary|metering|memory', label: 'Memory Price' },
+      { key: 'summary|metering|additionalMtd', label: 'MTD Additional Price' },
+      { key: 'summary|metering|cpuMtd', label: 'MTD CPU Price' },
+      { key: 'summary|metering|memoryMtd', label: 'MTD Memory Price' },
+      { key: 'summary|metering|storageMtd', label: 'MTD Storage Price' },
+      { key: 'summary|metering|valueMtd', label: 'MTD Total Price' },
+      { key: 'summary|metering|storage', label: 'Storage Price' },
+      { key: 'summary|metering|value', label: 'Total Price' },
+    ],
+  },
+];
+
+// Cluster Metrics (kind:cluster)
+const CLUSTER_METRIC_CATEGORIES: MetricCategory[] = [
+  {
+    name: 'System Health & Compliance',
+    metrics: [
+      { key: 'badge|compliance', label: 'Compliance Badge' },
+      { key: 'badge|efficiency', label: 'Efficiency Badge' },
+      { key: 'badge|health', label: 'Health Badge' },
+      { key: 'badge|risk', label: 'Risk Badge' },
+      { key: 'badge|workload', label: 'Workload Badge' },
+    ],
+  },
+  {
+    name: 'Capacity Analytics',
+    metrics: [
+      { key: 'OnlineCapacityAnalytics|capacityRemainingPercentage', label: 'Capacity Remaining (%)' },
+      { key: 'OnlineCapacityAnalytics|cpu|capacityRemaining', label: 'CPU Capacity Remaining' },
+      { key: 'OnlineCapacityAnalytics|cpu|recommendedSize', label: 'CPU Recommended Size' },
+      { key: 'OnlineCapacityAnalytics|cpu|timeRemaining', label: 'CPU Time Remaining' },
+      { key: 'OnlineCapacityAnalytics|mem|capacityRemaining', label: 'Memory Capacity Remaining' },
+      { key: 'OnlineCapacityAnalytics|mem|recommendedSize', label: 'Memory Recommended Size' },
+      { key: 'OnlineCapacityAnalytics|mem|timeRemaining', label: 'Memory Time Remaining' },
+      { key: 'OnlineCapacityAnalytics|timeRemaining', label: 'Overall Time Remaining' },
+    ],
+  },
+  {
+    name: 'CPU Metrics',
+    metrics: [
+      { key: 'cpu|capacity_contentionPct', label: 'Capacity Contention (%)' },
+      { key: 'cpu|demandmhz', label: 'Demand (MHz)' },
+      { key: 'cpu|dynamic_entitlement', label: 'Dynamic Entitlement' },
+      { key: 'cpu|effective_limit', label: 'Effective Limit' },
+      { key: 'cpu|estimated_entitlement', label: 'Estimated Entitlement' },
+      { key: 'cpu|reservation_used', label: 'Reservation Used' },
+      { key: 'cpu|usagemhz_average', label: 'Usage (MHz)' },
+      { key: 'cpu|workload', label: 'CPU Workload' },
+    ],
+  },
+  {
+    name: 'Memory Metrics',
+    metrics: [
+      { key: 'mem|consumed_average', label: 'Consumed (KB)' },
+      { key: 'mem|host_contentionPct', label: 'Host Contention (%)' },
+      { key: 'mem|dynamic_entitlement', label: 'Dynamic Entitlement' },
+      { key: 'mem|effective_limit', label: 'Effective Limit' },
+      { key: 'mem|granted_average', label: 'Granted (KB)' },
+      { key: 'mem|active_average', label: 'Active (KB)' },
+      { key: 'mem|guest_demand', label: 'Guest Demand (KB)' },
+      { key: 'mem|guest_usage', label: 'Guest Usage (%)' },
+      { key: 'mem|reservation_used', label: 'Reservation Used' },
+      { key: 'mem|shared_average', label: 'Shared (KB)' },
+      { key: 'mem|swapinRate_average', label: 'Swap In Rate (KBps)' },
+      { key: 'mem|swapoutRate_average', label: 'Swap Out Rate (KBps)' },
+      { key: 'mem|guest_provisioned', label: 'Guest Provisioned (KB)' },
+      { key: 'mem|usage_average', label: 'Usage (%)' },
+      { key: 'mem|overhead_average', label: 'Overhead (KB)' },
+      { key: 'mem|workload', label: 'Memory Workload' },
+    ],
+  },
+  {
+    name: 'Virtual Machine Summary',
+    metrics: [
+      { key: 'summary|number_running_vms', label: 'Number of Running VMs' },
+      { key: 'summary|number_vm_templates', label: 'Number of VM Templates' },
+      { key: 'summary|total_number_vms', label: 'Total Number of VMs' },
+    ],
+  },
+];
+
+// Helper function to get metric categories based on resource kind
+const getMetricCategoriesForKind = (entityType?: string, tags?: string[]): MetricCategory[] => {
+  if (entityType === 'CCI.Supervisor.Namespace') {
+    return SUPERVISOR_NAMESPACE_METRIC_CATEGORIES;
+  }
+  if (entityType === 'vcf-automation-project') {
+    return PROJECT_METRIC_CATEGORIES;
+  }
+  if (tags?.includes('kind:cluster')) {
+    return CLUSTER_METRIC_CATEGORIES;
+  }
+  // Default to VM metrics for kind:virtualmachine and other resource types
+  return VM_METRIC_CATEGORIES;
+};
+
+// Helper function to get all metrics for a given set of categories
+const getAllMetricsFromCategories = (categories: MetricCategory[]): MetricSelection[] => {
+  return categories.flatMap(category => category.metrics);
+};
 
 const TIME_RANGES = [
   { label: 'Last Hour', hours: 1 },
@@ -261,6 +481,7 @@ interface ResourceDetectionResult {
   found: boolean;
   resource?: Resource;
   error?: string;
+  permissionError?: boolean;
   notImplemented?: {
     entityType: string;
     entityKind?: string;
@@ -268,18 +489,75 @@ interface ResourceDetectionResult {
   };
 }
 
+// Helper function to check if an error is a permission error
+const isPermissionError = (error: unknown): boolean => {
+  return error instanceof VcfOperationsApiError && error.status === 403;
+};
+
+// Helper function to extract error message from any error type
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof VcfOperationsApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+};
+
 export const VCFOperationsExplorer = () => {
   const classes = useStyles();
   const vcfOperationsApi = useApi(vcfOperationsApiRef);
   const { entity } = useEntity();
 
-  // Default selected metrics: CPU, Memory, and Network usage
-  const defaultMetrics = [
-    { key: 'cpu|usage_average', label: 'CPU Usage (%)' },
-    { key: 'mem|usage_average', label: 'Memory Usage (%)' },
-    { key: 'net|usage_average', label: 'Network Usage (KBps)' },
-  ];
-  const [selectedMetrics, setSelectedMetrics] = useState<MetricSelection[]>(defaultMetrics);
+  // Get entity type and tags to determine resource kind
+  const entityType = entity.spec?.type as string;
+  const entityTags = entity.metadata.tags || [];
+  
+  // Get appropriate metric categories based on resource kind
+  const currentMetricCategories = getMetricCategoriesForKind(entityType, entityTags);
+  const allMetrics = getAllMetricsFromCategories(currentMetricCategories);
+
+  // Default selected metrics based on resource kind
+  const getDefaultMetrics = (entityType?: string, tags?: string[]): MetricSelection[] => {
+    if (entityType === 'CCI.Supervisor.Namespace') {
+      return [
+        { key: 'badge|health', label: 'Health Badge' },
+        { key: 'badge|compliance', label: 'Compliance Badge' },
+        { key: 'cpu|effective_usagemhz_average', label: 'Effective CPU Usage (MHz)' },
+        { key: 'mem|consumed_average', label: 'Memory Consumed (KB)' },
+      ];
+    }
+    if (entityType === 'vcf-automation-project') {
+      return [
+        { key: 'badge|health', label: 'Health Badge' },
+        { key: 'badge|compliance', label: 'Compliance Badge' },
+        { key: 'cost|aggregatedMtdTotalCost', label: 'MTD Total Cost' },
+        { key: 'cpu|usagemhz_average', label: 'CPU Usage (MHz)' },
+        { key: 'mem|usage_average', label: 'Memory Usage (%)' },
+      ];
+    }
+    if (tags?.includes('kind:cluster')) {
+      return [
+        { key: 'mem|usage_average', label: 'Memory Usage (%)' },
+        { key: 'cpu|usagemhz_average', label: 'CPU Usage (MHz)' },
+        { key: 'OnlineCapacityAnalytics|timeRemaining', label: 'Overall Time Remaining' },
+        { key: 'badge|compliance', label: 'Compliance Badge' },
+        { key: 'badge|efficiency', label: 'Efficiency Badge' },
+        { key: 'badge|health', label: 'Health Badge' },
+        { key: 'badge|risk', label: 'Risk Badge' },
+        { key: 'badge|workload', label: 'Workload Badge' },
+      ];
+    }
+    // Default for VMs and other resources
+    return [
+      { key: 'cpu|usage_average', label: 'CPU Usage (%)' },
+      { key: 'mem|usage_average', label: 'Memory Usage (%)' },
+      { key: 'net|usage_average', label: 'Network Usage (KBps)' },
+    ];
+  };
+
+  const [selectedMetrics, setSelectedMetrics] = useState<MetricSelection[]>(getDefaultMetrics(entityType, entityTags));
   const [timeRange, setTimeRange] = useState(24); // Default to 24 hours
   const [customStartTime, setCustomStartTime] = useState('');
   const [customEndTime, setCustomEndTime] = useState('');
@@ -292,6 +570,7 @@ export const VCFOperationsExplorer = () => {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [resourceDetection, setResourceDetection] = useState<ResourceDetectionResult>({ found: false });
   const [detectingResource, setDetectingResource] = useState(true);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   // Load instances
   useEffect(() => {
@@ -303,7 +582,16 @@ export const VCFOperationsExplorer = () => {
           setSelectedInstance(instancesList[0].name);
         }
       } catch (err) {
-        // Failed to load instances - handled silently
+        // Check if this is a permission error
+        if (isPermissionError(err)) {
+          setResourceDetection({
+            found: false,
+            permissionError: true,
+            error: getErrorMessage(err),
+          });
+          setDetectingResource(false);
+        }
+        // Other errors are handled silently for instances loading
       }
     };
 
@@ -352,7 +640,8 @@ export const VCFOperationsExplorer = () => {
             } catch (err) {
               setResourceDetection({
                 found: false,
-                error: `Error searching for namespace in VCF Operations: ${err instanceof Error ? err.message : String(err)}`,
+                error: `Error searching for namespace in VCF Operations: ${getErrorMessage(err)}`,
+                permissionError: isPermissionError(err),
               });
               return;
             }
@@ -398,6 +687,7 @@ export const VCFOperationsExplorer = () => {
             const resource = await vcfOperationsApi.findResourceByName(
               resourceName,
               selectedInstance || undefined,
+              'vm',
             );
             
             if (resource) {
@@ -412,22 +702,75 @@ export const VCFOperationsExplorer = () => {
           } catch (err) {
             setResourceDetection({
               found: false,
-              error: `Error searching for VM in VCF Operations: ${err instanceof Error ? err.message : String(err)}`,
+              error: `Error searching for VM in VCF Operations: ${getErrorMessage(err)}`,
+              permissionError: isPermissionError(err),
             });
             return;
           }
         }
 
-        // Check for cluster kind - not implemented
+        // Check for supervisor namespace components with spec.type === 'CCI.Supervisor.Namespace'
+        if (entityType === 'CCI.Supervisor.Namespace') {
+          // For supervisor namespaces, try to find by title/name first
+          try {
+            const resource = await vcfOperationsApi.findResourceByName(
+              entityTitle,
+              selectedInstance || undefined,
+              'supervisor-namespace',
+            );
+            
+            if (resource) {
+              setResourceDetection({ found: true, resource });
+              return;
+            }
+            setResourceDetection({
+              found: false,
+              error: `No VCF Operations resource found for supervisor namespace: ${entityTitle}. Make sure the namespace exists in VCF Operations and the name matches exactly.`,
+            });
+            return;
+          } catch (err) {
+            setResourceDetection({
+              found: false,
+              error: `Error searching for supervisor namespace in VCF Operations: ${getErrorMessage(err)}`,
+              permissionError: isPermissionError(err),
+            });
+            return;
+          }
+        }
+
+        // Check for cluster components with kind:cluster tag
         if (tags.includes('kind:cluster')) {
-          setResourceDetection({
-            found: false,
-            notImplemented: {
-              entityType: 'Cluster',
-              reason: 'Cluster metrics support is currently being developed and will be available in an upcoming release.',
-            },
-          });
-          return;
+          let clusterName = entityTitle;
+          
+          // Handle standalone clusters - remove " (Standalone)" suffix
+          if (tags.includes('standalone-resource')) {
+            clusterName = entityTitle.replace(' (Standalone)', '');
+          }
+          
+          try {
+            const resource = await vcfOperationsApi.findResourceByName(
+              clusterName,
+              selectedInstance || undefined,
+              'cluster',
+            );
+            
+            if (resource) {
+              setResourceDetection({ found: true, resource });
+              return;
+            }
+            setResourceDetection({
+              found: false,
+              error: `No VCF Operations resource found for cluster: ${clusterName}. Make sure the cluster exists in VCF Operations and the name matches exactly.`,
+            });
+            return;
+          } catch (err) {
+            setResourceDetection({
+              found: false,
+              error: `Error searching for cluster in VCF Operations: ${getErrorMessage(err)}`,
+              permissionError: isPermissionError(err),
+            });
+            return;
+          }
         }
 
         // Check for VCF Automation project domains
@@ -436,6 +779,7 @@ export const VCFOperationsExplorer = () => {
             const resource = await vcfOperationsApi.findResourceByName(
               entityTitle,
               selectedInstance || undefined,
+              'project',
             );
             
             if (resource) {
@@ -450,7 +794,8 @@ export const VCFOperationsExplorer = () => {
           } catch (err) {
             setResourceDetection({
               found: false,
-              error: `Error searching for project in VCF Operations: ${err instanceof Error ? err.message : String(err)}`,
+              error: `Error searching for project in VCF Operations: ${getErrorMessage(err)}`,
+              permissionError: isPermissionError(err),
             });
             return;
           }
@@ -490,7 +835,8 @@ export const VCFOperationsExplorer = () => {
       } catch (err) {
         setResourceDetection({
           found: false,
-          error: `Unexpected error during resource detection: ${err instanceof Error ? err.message : String(err)}`,
+          error: `Unexpected error during resource detection: ${getErrorMessage(err)}`,
+          permissionError: isPermissionError(err),
         });
       } finally {
         setDetectingResource(false);
@@ -557,7 +903,7 @@ export const VCFOperationsExplorer = () => {
 
       setMetricsData(data.values || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(getErrorMessage(err));
       setMetricsData([]);
     } finally {
       setLoading(false);
@@ -590,7 +936,7 @@ export const VCFOperationsExplorer = () => {
   };
 
   const handleSelectAll = () => {
-    setSelectedMetrics([...ALL_METRICS]);
+    setSelectedMetrics([...allMetrics]);
   };
 
   const handleDeselectAll = () => {
@@ -638,7 +984,19 @@ export const VCFOperationsExplorer = () => {
     return selectedCount > 0 && selectedCount < categoryMetricKeys.length;
   };
 
-  const isAllSelected = selectedMetrics.length === ALL_METRICS.length;
+  const toggleCategoryExpansion = (categoryName: string) => {
+    setExpandedCategories(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(categoryName)) {
+        newSet.delete(categoryName);
+      } else {
+        newSet.add(categoryName);
+      }
+      return newSet;
+    });
+  };
+
+  const isAllSelected = selectedMetrics.length === allMetrics.length;
   const isNoneSelected = selectedMetrics.length === 0;
 
   // Show loading while detecting resource
@@ -655,6 +1013,29 @@ export const VCFOperationsExplorer = () => {
                 </Typography>
               </Box>
             </Box>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  }
+
+  // Show permission error if user doesn't have access
+  if (resourceDetection.permissionError) {
+    return (
+      <Box className={classes.root}>
+        <Card>
+          <CardContent>
+            <Alert severity="error">
+              <Typography variant="h6" gutterBottom>
+                Access Denied
+              </Typography>
+              <Typography variant="body2">
+                {resourceDetection.error}
+              </Typography>
+              <Typography variant="body2" style={{ marginTop: 8 }}>
+                Please contact your administrator to request access to VCF Operations metrics.
+              </Typography>
+            </Alert>
           </CardContent>
         </Card>
       </Box>
@@ -804,7 +1185,7 @@ export const VCFOperationsExplorer = () => {
           <Card className={classes.metricsCard}>
             <CardHeader 
               title="Available Metrics"
-              subheader={`${selectedMetrics.length} of ${ALL_METRICS.length} selected`}
+              subheader={`${selectedMetrics.length} of ${allMetrics.length} selected`}
             />
             
             {/* Select All Controls */}
@@ -832,49 +1213,63 @@ export const VCFOperationsExplorer = () => {
             </Box>
 
             <CardContent className={classes.metricsCardContent}>
-              {METRIC_CATEGORIES.map((category) => (
-                <Box key={category.name}>
-                  <Box 
-                    className={classes.categoryHeaderContainer}
-                    onClick={() => handleCategoryToggle(category)}
-                  >
-                    <Checkbox
-                      checked={isCategorySelected(category)}
-                      indeterminate={isCategoryPartiallySelected(category)}
-                      color="primary"
-                      size="small"
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() => handleCategoryToggle(category)}
-                    />
-                    <Typography variant="subtitle2" className={classes.categoryTitle}>
-                      {category.name} ({category.metrics.filter(m => selectedMetrics.some(sm => sm.key === m.key)).length}/{category.metrics.length})
-                    </Typography>
-                  </Box>
-                  {category.metrics.map((metric) => {
-                    const isSelected = selectedMetrics.some(m => m.key === metric.key);
-                    return (
-                      <Box 
-                        key={metric.key} 
-                        className={classes.metricItem}
-                        onClick={() => handleMetricToggle(metric)}
-                        style={{ cursor: 'pointer' }}
+              {currentMetricCategories.map((category) => {
+                const isExpanded = expandedCategories.has(category.name);
+                return (
+                  <Box key={category.name}>
+                    <Box 
+                      className={classes.categoryHeaderContainer}
+                      onClick={() => toggleCategoryExpansion(category.name)}
+                    >
+                      <IconButton 
+                        size="small" 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCategoryExpansion(category.name);
+                        }}
                       >
-                        <FormControlLabel
-                          control={
-                            <Checkbox
-                              checked={isSelected}
-                              color="primary"
-                              className={classes.metricCheckbox}
+                        {isExpanded ? <ExpandMore /> : <ChevronRight />}
+                      </IconButton>
+                      <Checkbox
+                        checked={isCategorySelected(category)}
+                        indeterminate={isCategoryPartiallySelected(category)}
+                        color="primary"
+                        size="small"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => handleCategoryToggle(category)}
+                      />
+                      <Typography variant="subtitle2" className={classes.categoryTitle}>
+                        {category.name} ({category.metrics.filter(m => selectedMetrics.some(sm => sm.key === m.key)).length}/{category.metrics.length})
+                      </Typography>
+                    </Box>
+                    <Collapse in={isExpanded}>
+                      {category.metrics.map((metric) => {
+                        const isSelected = selectedMetrics.some(m => m.key === metric.key);
+                        return (
+                          <Box 
+                            key={metric.key} 
+                            className={classes.metricItem}
+                            onClick={() => handleMetricToggle(metric)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <FormControlLabel
+                              control={
+                                <Checkbox
+                                  checked={isSelected}
+                                  color="primary"
+                                  className={classes.metricCheckbox}
+                                />
+                              }
+                              label={metric.label}
+                              style={{ width: '100%', margin: 0 }}
                             />
-                          }
-                          label={metric.label}
-                          style={{ width: '100%', margin: 0 }}
-                        />
-                      </Box>
-                    );
-                  })}
-                </Box>
-              ))}
+                          </Box>
+                        );
+                      })}
+                    </Collapse>
+                  </Box>
+                );
+              })}
             </CardContent>
           </Card>
         </Box>

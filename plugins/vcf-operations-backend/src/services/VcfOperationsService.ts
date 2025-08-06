@@ -66,6 +66,12 @@ interface ResourceQueryRequest {
   };
 }
 
+interface ProjectQueryRequest {
+  name: string[];
+  adapterKind: string[];
+  resourceKind: string[];
+}
+
 interface Resource {
   identifier: string;
   resourceKey: {
@@ -483,6 +489,38 @@ export class VcfOperationsService {
     });
   }
 
+  async queryProjectResources(
+    queryRequest: ProjectQueryRequest,
+    instanceName?: string,
+  ): Promise<{ resourceList: Resource[] }> {
+    const instance = this.getInstance(instanceName);
+    
+    this.logger.debug(`Querying project resources with request: ${JSON.stringify(queryRequest)}`);
+    
+    const endpoint = '/api/resources/query?page=0&pageSize=1000&_no_links=true';
+    
+    return this.makeRequest<{ resourceList: Resource[] }>(instance, endpoint, {
+      method: 'POST',
+      body: JSON.stringify(queryRequest),
+    });
+  }
+
+  async queryClusterResources(
+    queryRequest: ProjectQueryRequest,
+    instanceName?: string,
+  ): Promise<{ resourceList: Resource[] }> {
+    const instance = this.getInstance(instanceName);
+    
+    this.logger.debug(`Querying cluster resources with request: ${JSON.stringify(queryRequest)}`);
+    
+    const endpoint = '/api/resources/query?page=0&pageSize=1000&_no_links=true';
+    
+    return this.makeRequest<{ resourceList: Resource[] }>(instance, endpoint, {
+      method: 'POST',
+      body: JSON.stringify(queryRequest),
+    });
+  }
+
   async findResourceByProperty(
     propertyKey: string,
     propertyValue: string,
@@ -508,18 +546,61 @@ export class VcfOperationsService {
   async findResourceByName(
     resourceName: string,
     instanceName?: string,
+    resourceType?: string,
+  ): Promise<Resource | null> {
+    this.logger.debug(`Searching for resource by name: ${resourceName}, type: ${resourceType}`);
+    
+    // Route to specific query method based on resource type
+    if (resourceType === 'project') {
+      return this.findProjectResource(resourceName, instanceName);
+    } else if (resourceType === 'vm') {
+      return this.findVMResource(resourceName, instanceName);
+    } else if (resourceType === 'supervisor-namespace') {
+      return this.findSupervisorNamespaceResource(resourceName, instanceName);
+    } else if (resourceType === 'cluster') {
+      return this.findClusterResource(resourceName, instanceName);
+    }
+    
+    // Fallback to general search if no specific type provided
+    return this.findGeneralResource(resourceName, instanceName);
+  }
+
+  private async findProjectResource(
+    resourceName: string,
+    instanceName?: string,
+  ): Promise<Resource | null> {
+    try {
+      const projectQueryRequest: ProjectQueryRequest = {
+        name: [resourceName],
+        adapterKind: ['VCFAutomation'],
+        resourceKind: ['ProjectAssignment'],
+      };
+
+      this.logger.debug(`Searching for ProjectAssignment with name: ${resourceName}`);
+      const projectResult = await this.queryProjectResources(projectQueryRequest, instanceName);
+      if (projectResult.resourceList && projectResult.resourceList.length > 0) {
+        this.logger.debug(`Found ProjectAssignment: ${projectResult.resourceList[0].identifier}`);
+        return projectResult.resourceList[0];
+      }
+    } catch (error) {
+      this.logger.error(`ProjectAssignment search failed for ${resourceName}`, error instanceof Error ? error : new Error(String(error)));
+    }
+    
+    return null;
+  }
+
+  private async findVMResource(
+    resourceName: string,
+    instanceName?: string,
   ): Promise<Resource | null> {
     const instance = this.getInstance(instanceName);
     
-    this.logger.debug(`Searching for resource by name: ${resourceName}`);
-    
-    // Try searching specifically for VirtualMachine resources first (like Python code)
     try {
       let endpoint = '/api/resources';
       const params = new URLSearchParams();
       params.append('name', resourceName);
-      params.append('adapterKind', 'VMWARE'); // Filter for VMware adapter
-      params.append('resourceKind', 'VirtualMachine'); // Filter for VMs
+      params.append('adapterKind', 'VMWARE');
+      params.append('resourceKind', 'VirtualMachine');
       endpoint += `?${params.toString()}`;
 
       this.logger.debug(`Searching for VirtualMachine with name: ${resourceName}`);
@@ -529,10 +610,52 @@ export class VcfOperationsService {
         return vmResult.resourceList[0];
       }
     } catch (error) {
-      this.logger.warn(`VirtualMachine search failed, trying general search`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`VirtualMachine search failed for ${resourceName}`, error instanceof Error ? error : new Error(String(error)));
     }
+    
+    return null;
+  }
 
-    // Try direct resource search (any type)
+  private async findClusterResource(
+    resourceName: string,
+    instanceName?: string,
+  ): Promise<Resource | null> {
+    try {
+      const clusterQueryRequest: ProjectQueryRequest = {
+        name: [resourceName],
+        adapterKind: ['VMWARE'],
+        resourceKind: ['ResourcePool'],
+      };
+
+      this.logger.debug(`Searching for ResourcePool with name: ${resourceName}`);
+      const clusterResult = await this.queryClusterResources(clusterQueryRequest, instanceName);
+      if (clusterResult.resourceList && clusterResult.resourceList.length > 0) {
+        this.logger.debug(`Found ResourcePool: ${clusterResult.resourceList[0].identifier}`);
+        return clusterResult.resourceList[0];
+      }
+    } catch (error) {
+      this.logger.error(`ResourcePool search failed for ${resourceName}`, error instanceof Error ? error : new Error(String(error)));
+    }
+    
+    return null;
+  }
+
+  private async findSupervisorNamespaceResource(
+    resourceName: string,
+    instanceName?: string,
+  ): Promise<Resource | null> {
+    // For supervisor namespaces, we can use the general property-based search
+    // since they should be findable by name in the general API
+    return this.findGeneralResource(resourceName, instanceName);
+  }
+
+  private async findGeneralResource(
+    resourceName: string,
+    instanceName?: string,
+  ): Promise<Resource | null> {
+    const instance = this.getInstance(instanceName);
+    
+    // Try direct resource search first
     try {
       let endpoint = '/api/resources';
       const params = new URLSearchParams();
@@ -541,13 +664,6 @@ export class VcfOperationsService {
 
       const directResult = await this.makeRequest<{ resourceList: Resource[] }>(instance, endpoint);
       if (directResult.resourceList && directResult.resourceList.length > 0) {
-        // If multiple resources found, prefer one with performance metrics
-        const resourcesWithMetrics = await this.filterResourcesByMetrics(directResult.resourceList, instanceName);
-        if (resourcesWithMetrics.length > 0) {
-          this.logger.debug(`Found resource with performance metrics: ${resourcesWithMetrics[0].identifier}`);
-          return resourcesWithMetrics[0];
-        }
-        
         this.logger.debug(`Found resource via direct search: ${directResult.resourceList[0].identifier}`);
         return directResult.resourceList[0];
       }
@@ -555,7 +671,7 @@ export class VcfOperationsService {
       this.logger.warn(`Direct resource search failed, trying query approach`, error instanceof Error ? error : new Error(String(error)));
     }
 
-    // Fallback to query approach
+    // Fallback to property-based query search
     try {
       const queryRequest: ResourceQueryRequest = {
         propertyConditions: {
@@ -577,51 +693,18 @@ export class VcfOperationsService {
 
       const result = await this.queryResources(queryRequest, instanceName);
       if (result.resourceList.length > 0) {
-        // If multiple resources found, prefer one with performance metrics
-        const resourcesWithMetrics = await this.filterResourcesByMetrics(result.resourceList, instanceName);
-        if (resourcesWithMetrics.length > 0) {
-          this.logger.debug(`Found resource with performance metrics via query: ${resourcesWithMetrics[0].identifier}`);
-          return resourcesWithMetrics[0];
-        }
-        
         this.logger.debug(`Found resource via query search: ${result.resourceList[0].identifier}`);
         return result.resourceList[0];
       }
     } catch (error) {
-      this.logger.warn(`Query resource search failed`, error instanceof Error ? error : new Error(String(error)));
+      this.logger.error(`Query resource search failed for ${resourceName}`, error instanceof Error ? error : new Error(String(error)));
     }
 
     this.logger.debug(`No resource found with name: ${resourceName}`);
     return null;
   }
 
-  private async filterResourcesByMetrics(resources: Resource[], instanceName?: string): Promise<Resource[]> {
-    const resourcesWithMetrics: Resource[] = [];
-    
-    for (const resource of resources) {
-      try {
-        const metrics = await this.getAvailableMetrics(resource.identifier, instanceName);
-        const statKeys = metrics['stat-key'] || [];
-        
-        // Check if this resource has performance metrics (cpu, mem, disk, net)
-        const hasPerformanceMetrics = statKeys.some((stat: any) => {
-          const key = stat.key?.toLowerCase() || '';
-          return key.includes('cpu|') || key.includes('mem|') || key.includes('disk|') || key.includes('net|');
-        });
-        
-        if (hasPerformanceMetrics) {
-          this.logger.debug(`Resource ${resource.identifier} has performance metrics`);
-          resourcesWithMetrics.push(resource);
-        } else {
-          this.logger.debug(`Resource ${resource.identifier} only has system metrics: ${statKeys.map((s: any) => s.key).slice(0, 5).join(', ')}`);
-        }
-      } catch (error) {
-        this.logger.warn(`Could not check metrics for resource ${resource.identifier}`, error instanceof Error ? error : new Error(String(error)));
-      }
-    }
-    
-    return resourcesWithMetrics;
-  }
+
 
   getInstances(): Array<{ name: string; relatedVCFAInstances?: string[] }> {
     return this.instances.map(instance => ({

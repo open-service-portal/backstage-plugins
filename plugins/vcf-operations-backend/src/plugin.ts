@@ -19,6 +19,7 @@ export const vcfOperationsPlugin = createBackendPlugin({
         permissions: coreServices.permissions,
         config: coreServices.rootConfig,
         permissionsRegistry: coreServices.permissionsRegistry,
+        httpAuth: coreServices.httpAuth,
       },
       async init({
         httpRouter,
@@ -26,6 +27,7 @@ export const vcfOperationsPlugin = createBackendPlugin({
         permissions,
         config,
         permissionsRegistry,
+        httpAuth,
       }) {
         permissionsRegistry.addPermissions(Object.values(vcfOperationsPermissions));
         
@@ -34,6 +36,7 @@ export const vcfOperationsPlugin = createBackendPlugin({
             logger,
             permissions,
             config,
+            httpAuth,
           }),
         );
         httpRouter.addAuthPolicy({
