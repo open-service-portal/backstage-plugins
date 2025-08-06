@@ -19,9 +19,9 @@ interface EntityScaffolderContentProps {
   // Map entity data to template fields
   buildInitialState?: (entity: Entity) => Record<string, unknown>;
   
-  // Additional template filtering
-  additionalTemplateFilters?: Array<(template: Template) => boolean>;
-  
+  // Scaffolder Field Extensions Support
+  ScaffolderFieldExtensions?: ReactNode;  
+
   // Default template category
   defaultCategory?: string;
 }
@@ -68,18 +68,20 @@ const buildInitialState = (entity: Entity) => ({
 });
 ```
 
-### Additional Template Filters
+### Field Extensions Support
 
-Add extra filtering rules beyond group filters:
+Add field extensions support:
 
 ```typescript
-const additionalTemplateFilters = [
-  // Filter out deprecated templates
-  (template) => !template.metadata?.labels?.deprecated,
-  
-  // Only show templates with specific tag
-  (template) => template.metadata?.tags?.includes('approved'),
-];
+import { ScaffolderFieldExtensions } from '@backstage/plugin-scaffolder-react';
+import { EntityPickerFieldExtension, RepoUrlPickerFieldExtension } from '@backstage/plugin-scaffolder';
+
+ScaffolderFieldExtensions={
+  <ScaffolderFieldExtensions>
+    <RepoUrlPickerFieldExtension />
+    <EntityPickerFieldExtension />
+  </ScaffolderFieldExtensions>
+}
 ```
 
 ## Entity Page Integration
@@ -90,6 +92,9 @@ Add the plugin to an entity page:
 
 ```typescript
 import { EntityScaffolderContent } from '@terasky/backstage-plugin-entity-scaffolder-content';
+import { GitOpsManifestUpdaterExtension } from '@terasky/backstage-plugin-gitops-manifest-updater';
+import { ScaffolderFieldExtensions } from '@backstage/plugin-scaffolder-react';
+import { EntityPickerFieldExtension, RepoUrlPickerFieldExtension } from '@backstage/plugin-scaffolder';
 
 const entityPage = (
   <EntityLayout>
@@ -100,6 +105,13 @@ const entityPage = (
       <EntityScaffolderContent
         templateGroupFilters={templateGroupFilters}
         buildInitialState={buildInitialState}
+        ScaffolderFieldExtensions={
+          <ScaffolderFieldExtensions>
+            <RepoUrlPickerFieldExtension />
+            <EntityPickerFieldExtension />
+            <GitOpsManifestUpdaterExtension />
+          </ScaffolderFieldExtensions>
+        }
       />
     </EntityLayout.Route>
   </EntityLayout>
