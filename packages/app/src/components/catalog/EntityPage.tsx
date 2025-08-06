@@ -397,6 +397,9 @@ const vcfAutomationCCINamespacePage = (
     <EntityLayout.Route path="/vcf-automation" title="VCF Automation">
       <VCFAutomationCCINamespaceDetails />
     </EntityLayout.Route>
+    <EntityLayout.Route path="/vcf-operations" title="VCF Operations">
+      <VCFOperationsExplorerComponent />
+    </EntityLayout.Route>
   </EntityLayout>
 );
 
@@ -748,6 +751,9 @@ const domainPage = (
     </EntityLayout.Route>
     <EntityLayout.Route path="/vcf-automation" title="VCF Automation">
       <VCFAutomationProjectDetails />
+    </EntityLayout.Route>
+    <EntityLayout.Route path="/vcf-operations" title="VCF Operations">
+      <VCFOperationsExplorerComponent />
     </EntityLayout.Route>
   </EntityLayout>
 );
