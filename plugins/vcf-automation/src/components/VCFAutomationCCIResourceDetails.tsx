@@ -1,7 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { useApi } from '@backstage/core-plugin-api';
+import { usePermission } from '@backstage/plugin-permission-react';
 import { useAsync } from 'react-use';
+import Editor from '@monaco-editor/react';
 import {
   InfoCard,
   StructuredMetadataTable,
@@ -23,12 +25,20 @@ import {
   Tab,
   Accordion,
   AccordionSummary,
-  AccordionDetails
+  AccordionDetails,
+  Button,
+  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@material-ui/core';
+import { Alert } from '@material-ui/lab';
 import { makeStyles } from '@material-ui/core/styles';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
 import * as yaml from 'js-yaml';
 import { vcfAutomationApiRef } from '../api';
+import { supervisorResourceEditPermission } from '@terasky/backstage-plugin-vcf-automation-common';
 
 const useStyles = makeStyles(theme => ({
   statusChip: {
@@ -58,6 +68,33 @@ const useStyles = makeStyles(theme => ({
   },
   tabPanel: {
     paddingTop: theme.spacing(2),
+  },
+  yamlEditorContainer: {
+    height: '70vh',
+    minHeight: '500px',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  monacoEditor: {
+    flex: 1,
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: theme.shape.borderRadius,
+  },
+  validationStatus: {
+    padding: theme.spacing(1),
+    borderTop: `1px solid ${theme.palette.divider}`,
+    backgroundColor: theme.palette.background.paper,
+    flexShrink: 0,
+  },
+  yamlValidationError: {
+    color: theme.palette.error.main,
+    fontSize: '0.875rem',
+  },
+  editorActions: {
+    display: 'flex',
+    gap: theme.spacing(1),
+    marginTop: theme.spacing(2),
+    justifyContent: 'flex-end',
   },
 }));
 
@@ -99,6 +136,24 @@ export const VCFAutomationCCIResourceDetails = () => {
   const { entity } = useEntity();
   const [tabValue, setTabValue] = useState(0);
   const api = useApi(vcfAutomationApiRef);
+
+  // Permission check for supervisor resource editing
+  const { allowed: canEditResource } = usePermission({
+    permission: supervisorResourceEditPermission,
+  });
+
+  // State for YAML editor tab
+  const [editingYaml, setEditingYaml] = useState('');
+  const [originalManifest, setOriginalManifest] = useState<any>(null);
+  const [isLoadingManifest, setIsLoadingManifest] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [yamlValidationError, setYamlValidationError] = useState<string>('');
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success' as 'success' | 'error',
+  });
 
   // Extract stable values from entity
   const deploymentId = entity.spec?.system as string;
@@ -217,8 +272,138 @@ export const VCFAutomationCCIResourceDetails = () => {
   const createdAt = annotationData.createdAt;
   const origin = annotationData.origin;
 
+  // Extract resource-specific information for YAML editor
+  const resourceKind = manifest?.kind || objectData?.kind;
+  const resourceName = manifest?.metadata?.name || objectData?.metadata?.name;
+  const namespaceName = manifest?.metadata?.namespace || objectData?.metadata?.namespace;
+  const apiVersion = manifest?.apiVersion || objectData?.apiVersion;
+  
+  // For standalone resources, extract namespace URN ID
+  const namespaceUrnId = useMemo(() => {
+    if (!isStandalone || !namespaceName) return undefined;
+    const contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
+    return contextData?.namespaceUrnId || namespaceName;
+  }, [isStandalone, namespaceName, resourceContext]);
+
+  // Load manifest for editing
+  const loadManifestForEditing = useCallback(async () => {
+    if (!canEditResource || !namespaceName || !resourceName || !namespaceUrnId || !apiVersion || !resourceKind) {
+      return;
+    }
+
+    setIsLoadingManifest(true);
+
+    try {
+      const manifestResponse = await api.getSupervisorResourceManifest(
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        resourceKind,
+        instanceName
+      );
+
+      setOriginalManifest(manifestResponse);
+      const yamlContent = yaml.dump(manifestResponse, {
+        indent: 2,
+        lineWidth: -1,
+        noRefs: true,
+        sortKeys: false,
+      });
+      setEditingYaml(yamlContent);
+      setYamlValidationError('');
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: `Failed to fetch resource manifest: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        severity: 'error',
+      });
+    } finally {
+      setIsLoadingManifest(false);
+    }
+  }, [canEditResource, namespaceName, resourceName, namespaceUrnId, apiVersion, resourceKind, instanceName, api]);
+
+  // YAML validation function
+  const validateYaml = useCallback((yamlString: string) => {
+    try {
+      yaml.load(yamlString);
+      setYamlValidationError('');
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Invalid YAML syntax';
+      setYamlValidationError(errorMessage);
+      return false;
+    }
+  }, []);
+
+  // Handle YAML editor changes with validation
+  const handleYamlChange = useCallback((value: string) => {
+    setEditingYaml(value);
+    if (value.trim()) {
+      validateYaml(value);
+    } else {
+      setYamlValidationError('');
+    }
+  }, [validateYaml]);
+
+  // Handle save resource
+  const handleSaveResource = useCallback(async () => {
+    if (!originalManifest || !namespaceName || !resourceName || !namespaceUrnId || !apiVersion || !resourceKind) {
+      return;
+    }
+
+    setIsSaving(true);
+    setConfirmDialogOpen(false);
+
+    try {
+      const updatedManifest = yaml.load(editingYaml);
+      
+      await api.updateSupervisorResourceManifest(
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        resourceKind,
+        updatedManifest,
+        instanceName
+      );
+
+      setSnackbar({
+        open: true,
+        message: 'Resource manifest updated successfully',
+        severity: 'success',
+      });
+
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: `Failed to update resource manifest: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        severity: 'error',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [originalManifest, namespaceName, resourceName, namespaceUrnId, apiVersion, resourceKind, editingYaml, instanceName, api]);
+
+  // Handle cancel editing
+  const handleCancelEditing = useCallback(() => {
+    setEditingYaml('');
+    setOriginalManifest(null);
+    setYamlValidationError('');
+  }, []);
+
+  const handleCloseSnackbar = useCallback(() => {
+    setSnackbar(prev => ({ ...prev, open: false }));
+  }, []);
+
   const handleTabChange = (_event: React.ChangeEvent<{}>, newValue: number) => {
     setTabValue(newValue);
+    
+    // Load manifest when YAML editor tab is selected
+    if (newValue === 5 && canEditResource && !editingYaml && !isLoadingManifest) {
+      loadManifestForEditing();
+    }
   };
 
   if (loading) {
@@ -473,6 +658,9 @@ export const VCFAutomationCCIResourceDetails = () => {
             <Tab label="Object Status" />
             <Tab label="Conditions" />
             <Tab label="YAML Views" />
+            {canEditResource && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+              <Tab label="Edit Manifest" />
+            )}
           </Tabs>
 
           <TabPanel value={tabValue} index={0}>
@@ -647,6 +835,129 @@ export const VCFAutomationCCIResourceDetails = () => {
               )}
             </Grid>
           </TabPanel>
+
+          {/* YAML Editor Tab */}
+          {canEditResource && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+            <TabPanel value={tabValue} index={5}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Typography variant="h6" className={classes.sectionTitle}>
+                    Edit Resource Manifest
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" gutterBottom>
+                    {resourceName} ({resourceKind})
+                  </Typography>
+                  
+                  {isLoadingManifest ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+                      <Typography>Loading manifest...</Typography>
+                    </Box>
+                  ) : (
+                    <Box className={classes.yamlEditorContainer}>
+                      <Box className={classes.monacoEditor}>
+                        <Editor
+                          height="100%"
+                          defaultLanguage="yaml"
+                          value={editingYaml}
+                          onChange={(value) => handleYamlChange(value || '')}
+                          theme="vs-dark"
+                          options={{
+                            minimap: { enabled: false },
+                            scrollBeyondLastLine: false,
+                            fontSize: 14,
+                            lineNumbers: 'on',
+                            wordWrap: 'off',
+                            automaticLayout: true,
+                            tabSize: 2,
+                            insertSpaces: true,
+                            folding: true,
+                            renderWhitespace: 'selection',
+                          }}
+                        />
+                      </Box>
+                      
+                      {/* Fixed Validation Status Bar */}
+                      <Box className={classes.validationStatus}>
+                        {yamlValidationError ? (
+                          <Typography className={classes.yamlValidationError}>
+                            ⚠️ YAML Validation Error: {yamlValidationError}
+                          </Typography>
+                        ) : editingYaml.trim() ? (
+                          <Typography variant="caption" color="textSecondary">
+                            ✅ YAML syntax is valid
+                          </Typography>
+                        ) : (
+                          <Typography variant="caption" color="textSecondary">
+                            Enter YAML content above
+                          </Typography>
+                        )}
+                      </Box>
+
+                      {/* Action Buttons */}
+                      <Box className={classes.editorActions}>
+                        <Button
+                          variant="outlined"
+                          onClick={handleCancelEditing}
+                          disabled={isSaving}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          onClick={() => setConfirmDialogOpen(true)}
+                          disabled={!editingYaml.trim() || !!yamlValidationError || isSaving}
+                        >
+                          {isSaving ? 'Saving...' : 'Save Changes'}
+                        </Button>
+                      </Box>
+                    </Box>
+                  )}
+                </Grid>
+              </Grid>
+            </TabPanel>
+          )}
+
+          {/* Confirmation Dialog */}
+          <Dialog
+            open={confirmDialogOpen}
+            onClose={() => setConfirmDialogOpen(false)}
+            maxWidth="sm"
+            fullWidth
+          >
+            <DialogTitle>Confirm Changes</DialogTitle>
+            <DialogContent>
+              <Typography>
+                Are you sure you want to apply these changes to the resource? 
+                This action will update the Kubernetes resource based on your modifications.
+              </Typography>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setConfirmDialogOpen(false)} color="primary">
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveResource}
+                color="primary"
+                variant="contained"
+                disabled={isSaving}
+              >
+                {isSaving ? 'Applying...' : 'Apply Changes'}
+              </Button>
+            </DialogActions>
+          </Dialog>
+
+          {/* Snackbar for notifications */}
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={6000}
+            onClose={handleCloseSnackbar}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+          >
+            <Alert onClose={handleCloseSnackbar} severity={snackbar.severity}>
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
         </InfoCard>
       </Grid>
     </Grid>

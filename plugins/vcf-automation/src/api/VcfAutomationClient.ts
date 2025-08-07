@@ -138,6 +138,9 @@ export interface VcfAutomationApi {
   executeVmPowerAction(resourceId: string, action: 'PowerOn' | 'PowerOff', instanceName?: string): Promise<any>;
   getStandaloneVmStatus(namespaceUrnId: string, namespaceName: string, vmName: string, instanceName?: string): Promise<any>;
   executeStandaloneVmPowerAction(namespaceUrnId: string, namespaceName: string, vmName: string, powerState: 'PoweredOn' | 'PoweredOff', vmData: any, instanceName?: string): Promise<any>;
+  // Supervisor Resource Manifest Management
+  getSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, instanceName?: string): Promise<any>;
+  updateSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, manifest: any, instanceName?: string): Promise<any>;
 }
 
 export const vcfAutomationApiRef = createApiRef<VcfAutomationApi>({
@@ -427,6 +430,56 @@ export class VcfAutomationClient implements VcfAutomationApi {
     });
     if (!response.ok) {
       throw new Error(`Failed to execute standalone VM power action: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  // Supervisor Resource Manifest Management
+  async getSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const params = new URLSearchParams({
+      apiVersion,
+      kind,
+    });
+    if (instanceName) {
+      params.append('instance', instanceName);
+    }
+    
+    const url = `${baseUrl}/supervisor-resource-manifest/${namespaceUrnId}/${namespaceName}/${resourceName}?${params.toString()}`;
+    const response = await fetch(url, {
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to get supervisor resource manifest: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+  async updateSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, manifest: any, instanceName?: string): Promise<any> {
+    const baseUrl = await this.discoveryApi.getBaseUrl('vcf-automation');
+    const headers = await this.getAuthHeaders();
+    
+    const params = new URLSearchParams({
+      apiVersion,
+      kind,
+    });
+    if (instanceName) {
+      params.append('instance', instanceName);
+    }
+    
+    const url = `${baseUrl}/supervisor-resource-manifest/${namespaceUrnId}/${namespaceName}/${resourceName}?${params.toString()}`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ manifest }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to update supervisor resource manifest: ${response.statusText}`);
     }
     return await response.json();
   }

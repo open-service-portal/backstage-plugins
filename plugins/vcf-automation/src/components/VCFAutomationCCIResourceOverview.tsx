@@ -1,7 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { useEntity } from '@backstage/plugin-catalog-react';
 import { useApi } from '@backstage/core-plugin-api';
+import { usePermission } from '@backstage/plugin-permission-react';
 import { vcfAutomationApiRef } from '../api/VcfAutomationClient';
+import { supervisorResourceEditPermission } from '@terasky/backstage-plugin-vcf-automation-common';
+import Editor from '@monaco-editor/react';
 import {
   InfoCard,
   StructuredMetadataTable,
@@ -12,9 +15,25 @@ import {
   Progress,
   ResponseErrorPanel,
 } from '@backstage/core-components';
-import { Grid, Typography, Chip, Box, Accordion, AccordionSummary, AccordionDetails } from '@material-ui/core';
+import { 
+  Grid, 
+  Typography, 
+  Chip, 
+  Box, 
+  Accordion, 
+  AccordionSummary, 
+  AccordionDetails,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar
+} from '@material-ui/core';
+import { Alert } from '@material-ui/lab';
 import { makeStyles } from '@material-ui/core/styles';
 import ExpandMoreIcon from '@material-ui/icons/ExpandMore';
+import EditIcon from '@material-ui/icons/Edit';
 import yaml from 'js-yaml';
 import useAsync from 'react-use/lib/useAsync';
 import { VCFAutomationVMPowerManagement } from './VCFAutomationVMPowerManagement';
@@ -39,12 +58,65 @@ const useStyles = makeStyles(theme => ({
     margin: theme.spacing(0.25),
     cursor: 'pointer',
   },
+  editButton: {
+    marginTop: theme.spacing(1),
+  },
+  monacoEditor: {
+    flex: 1,
+    minHeight: '500px',
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: theme.shape.borderRadius,
+  },
+  validationStatus: {
+    padding: theme.spacing(1),
+    borderTop: `1px solid ${theme.palette.divider}`,
+    backgroundColor: theme.palette.background.paper,
+    flexShrink: 0,
+  },
+  dialogContent: {
+    padding: theme.spacing(2),
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  editorContainer: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  yamlValidationError: {
+    color: theme.palette.error.main,
+    marginTop: theme.spacing(1),
+    fontSize: '0.875rem',
+  },
 }));
 
 export const VCFAutomationCCIResourceOverview = () => {
   const classes = useStyles();
   const { entity } = useEntity();
   const api = useApi(vcfAutomationApiRef);
+
+  // Permission check for supervisor resource editing
+  const { allowed: canEditResource } = usePermission({
+    permission: supervisorResourceEditPermission,
+  });
+
+  // State for YAML editor modal
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingYaml, setEditingYaml] = useState('');
+  const [originalManifest, setOriginalManifest] = useState<any>(null);
+  const [isLoadingManifest, setIsLoadingManifest] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [yamlValidationError, setYamlValidationError] = useState<string>('');
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success' as 'success' | 'error',
+  });
 
   // Extract stable values from entity
   const deploymentId = entity.spec?.system as string;
@@ -151,10 +223,14 @@ export const VCFAutomationCCIResourceOverview = () => {
   const objectData = annotationData.objectData || apiResourceData?.properties?.object;
   const resourceContext = annotationData.resourceContext || apiResourceData?.properties?.context;
 
-  // Extract VM-specific information for power management
+  // Extract resource-specific information
   const resourceKind = manifest?.kind || objectData?.kind;
-  const vmName = manifest?.metadata?.name || objectData?.metadata?.name;
+  const resourceName = manifest?.metadata?.name || objectData?.metadata?.name;
   const namespaceName = manifest?.metadata?.namespace || objectData?.metadata?.namespace;
+  const apiVersion = manifest?.apiVersion || objectData?.apiVersion;
+  
+  // For backward compatibility, keep vmName for power management
+  const vmName = resourceName;
   
   // For standalone VMs, we need the namespace URN ID from the supervisor namespace
   // This is stored in the resource context during ingestion
@@ -176,6 +252,116 @@ export const VCFAutomationCCIResourceOverview = () => {
     
     return urnId;
   }, [isStandalone, namespaceName, resourceContext]);
+
+  // Handle edit resource manifest action
+  const handleEditResource = useCallback(async () => {
+    if (!canEditResource || !namespaceName || !resourceName || !namespaceUrnId || !apiVersion || !resourceKind) {
+      return;
+    }
+
+    setIsLoadingManifest(true);
+    setEditModalOpen(true);
+
+    try {
+      const manifestResponse = await api.getSupervisorResourceManifest(
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        resourceKind,
+        instanceName
+      );
+
+      setOriginalManifest(manifestResponse);
+      const yamlContent = yaml.dump(manifestResponse, {
+        indent: 2,
+        lineWidth: -1,
+        noRefs: true,
+        sortKeys: false,
+      });
+      setEditingYaml(yamlContent);
+      setYamlValidationError(''); // Reset validation error
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: `Failed to fetch resource manifest: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        severity: 'error',
+      });
+      setEditModalOpen(false);
+    } finally {
+      setIsLoadingManifest(false);
+    }
+  }, [canEditResource, namespaceName, resourceName, namespaceUrnId, apiVersion, resourceKind, instanceName, api]);
+
+  const handleSaveResource = useCallback(async () => {
+    if (!originalManifest || !namespaceName || !resourceName || !namespaceUrnId || !apiVersion || !resourceKind) {
+      return;
+    }
+
+    setIsSaving(true);
+    setConfirmDialogOpen(false);
+
+    try {
+      // Parse the edited YAML back to JSON
+      const updatedManifest = yaml.load(editingYaml);
+      
+      await api.updateSupervisorResourceManifest(
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        resourceKind,
+        updatedManifest,
+        instanceName
+      );
+
+      setSnackbar({
+        open: true,
+        message: 'Resource manifest updated successfully',
+        severity: 'success',
+      });
+
+      setEditModalOpen(false);
+
+      // Refresh the page after a brief delay
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: `Failed to update resource manifest: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        severity: 'error',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [originalManifest, namespaceName, resourceName, namespaceUrnId, apiVersion, resourceKind, editingYaml, instanceName, api]);
+
+  const handleCloseSnackbar = useCallback(() => {
+    setSnackbar(prev => ({ ...prev, open: false }));
+  }, []);
+
+  // YAML validation function
+  const validateYaml = useCallback((yamlString: string) => {
+    try {
+      yaml.load(yamlString);
+      setYamlValidationError('');
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Invalid YAML syntax';
+      setYamlValidationError(errorMessage);
+      return false;
+    }
+  }, []);
+
+  // Handle YAML editor changes with validation
+  const handleYamlChange = useCallback((value: string) => {
+    setEditingYaml(value);
+    if (value.trim()) {
+      validateYaml(value);
+    } else {
+      setYamlValidationError('');
+    }
+  }, [validateYaml]);
 
   if (loading) {
     return (
@@ -317,6 +503,48 @@ export const VCFAutomationCCIResourceOverview = () => {
           </Grid>
         )}
 
+        {/* Edit Resource Manifest for VirtualMachine resources with permission */}
+        {canEditResource && vmOrganizationType === 'all-apps' && resourceKind === 'VirtualMachine' && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+          <Grid item xs={12}>
+            <Box mt={vmOrganizationType === 'all-apps' ? 0 : 2}>
+              {vmOrganizationType !== 'all-apps' && (
+                <Typography variant="h6" className={classes.sectionTitle}>
+                  Resource Management
+                </Typography>
+              )}
+              <Button
+                variant="outlined"
+                color="primary"
+                startIcon={<EditIcon />}
+                onClick={handleEditResource}
+                className={classes.editButton}
+                disabled={isLoadingManifest}
+              >
+                Edit Resource Manifest
+              </Button>
+            </Box>
+          </Grid>
+        )}
+
+        {/* Edit Resource Manifest for non-VirtualMachine resources with permission */}
+        {canEditResource && (resourceKind !== 'VirtualMachine' || vmOrganizationType !== 'all-apps') && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+          <Grid item xs={12}>
+            <Typography variant="h6" className={classes.sectionTitle}>
+              Resource Management
+            </Typography>
+            <Button
+              variant="outlined"
+              color="primary"
+              startIcon={<EditIcon />}
+              onClick={handleEditResource}
+              className={classes.editButton}
+              disabled={isLoadingManifest}
+            >
+              Edit Resource Manifest
+            </Button>
+          </Grid>
+        )}
+
         {entity.spec?.dependsOn && Array.isArray(entity.spec.dependsOn) && entity.spec.dependsOn.length > 0 && (
           <Grid item xs={12}>
             <Typography variant="h6" className={classes.sectionTitle}>
@@ -449,6 +677,133 @@ export const VCFAutomationCCIResourceOverview = () => {
           </Grid>
         )}
       </Grid>
+
+      {/* YAML Editor Modal */}
+      <Dialog
+        open={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          style: {
+            height: '90vh',
+            maxHeight: '90vh',
+          },
+        }}
+      >
+        <DialogTitle>
+          <Typography variant="h6">Edit Resource Manifest</Typography>
+          <Typography variant="body2" color="textSecondary">
+            {resourceName} ({resourceKind})
+          </Typography>
+        </DialogTitle>
+        <DialogContent className={classes.dialogContent} dividers>
+          {isLoadingManifest ? (
+            <Box display="flex" justifyContent="center" alignItems="center" flex={1}>
+              <Progress />
+            </Box>
+          ) : (
+            <Box className={classes.editorContainer}>
+              <Typography variant="subtitle2" gutterBottom>
+                YAML Editor
+              </Typography>
+              
+              <Box className={classes.monacoEditor}>
+                <Editor
+                  height="100%"
+                  defaultLanguage="yaml"
+                  value={editingYaml}
+                  onChange={(value) => handleYamlChange(value || '')}
+                  theme="vs-dark"
+                  options={{
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    fontSize: 14,
+                    lineNumbers: 'on',
+                    wordWrap: 'off',
+                    automaticLayout: true,
+                    tabSize: 2,
+                    insertSpaces: true,
+                    folding: true,
+                    renderWhitespace: 'selection',
+                  }}
+                />
+              </Box>
+              
+              {/* Fixed Validation Status Bar */}
+              <Box className={classes.validationStatus}>
+                {yamlValidationError ? (
+                  <Typography className={classes.yamlValidationError}>
+                    ⚠️ YAML Validation Error: {yamlValidationError}
+                  </Typography>
+                ) : editingYaml.trim() ? (
+                  <Typography variant="caption" color="textSecondary">
+                    ✅ YAML syntax is valid
+                  </Typography>
+                ) : (
+                  <Typography variant="caption" color="textSecondary">
+                    Enter YAML content above
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditModalOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => setConfirmDialogOpen(true)}
+            color="primary"
+            variant="contained"
+            disabled={isLoadingManifest || !editingYaml.trim() || !!yamlValidationError}
+          >
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirmation Dialog */}
+      <Dialog
+        open={confirmDialogOpen}
+        onClose={() => setConfirmDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirm Changes</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to apply these changes to the resource? 
+            This action will update the Kubernetes resource based on your modifications.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialogOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSaveResource}
+            color="primary"
+            variant="contained"
+            disabled={isSaving}
+          >
+            {isSaving ? 'Applying...' : 'Apply Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </InfoCard>
   );
 };

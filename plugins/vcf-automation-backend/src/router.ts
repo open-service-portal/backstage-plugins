@@ -153,5 +153,39 @@ export async function createRouter(
     return res.json(result);
   });
 
+  // Supervisor Resource Manifest Management
+  router.get('/supervisor-resource-manifest/:namespaceUrnId/:namespaceName/:resourceName', async (req, res) => {
+    const { namespaceUrnId, namespaceName, resourceName } = req.params;
+    const instanceName = req.query.instance as string | undefined;
+    const apiVersion = req.query.apiVersion as string | undefined;
+    const kind = req.query.kind as string | undefined;
+    
+    if (!apiVersion || !kind) {
+      return res.status(400).json({ error: 'apiVersion and kind query parameters are required' });
+    }
+    
+    const result = await vcfService.getSupervisorResourceManifest(namespaceUrnId, namespaceName, resourceName, apiVersion, kind, instanceName);
+    return res.json(result);
+  });
+
+  router.put('/supervisor-resource-manifest/:namespaceUrnId/:namespaceName/:resourceName', async (req, res) => {
+    const { namespaceUrnId, namespaceName, resourceName } = req.params;
+    const { manifest } = req.body;
+    const instanceName = req.query.instance as string | undefined;
+    const apiVersion = req.query.apiVersion as string | undefined;
+    const kind = req.query.kind as string | undefined;
+    
+    if (!manifest) {
+      return res.status(400).json({ error: 'manifest is required' });
+    }
+    
+    if (!apiVersion || !kind) {
+      return res.status(400).json({ error: 'apiVersion and kind query parameters are required' });
+    }
+    
+    const result = await vcfService.updateSupervisorResourceManifest(namespaceUrnId, namespaceName, resourceName, apiVersion, kind, manifest, instanceName);
+    return res.json(result);
+  });
+
   return router;
 }

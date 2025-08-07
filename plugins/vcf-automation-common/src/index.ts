@@ -25,10 +25,16 @@ export const vmPowerManagementPermission = createPermission({
   attributes: { action: 'update' },
 });
 
+export const supervisorResourceEditPermission = createPermission({
+  name: 'vcf-automation.supervisor-resource.edit',
+  attributes: { action: 'update' },
+});
+
 export const vcfAutomationPermissions = [
   showDeploymentResourcesDataPermission, 
   viewProjectDetailsPermission, 
   viewDeploymentHistoryPermission, 
   viewDeploymentsUserEventsPermission,
-  vmPowerManagementPermission
+  vmPowerManagementPermission,
+  supervisorResourceEditPermission
 ];

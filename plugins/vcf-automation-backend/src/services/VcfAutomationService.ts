@@ -443,4 +443,109 @@ export class VcfAutomationService {
       return { error: 'Service temporarily unavailable', status: 'error' };
     }
   }
+
+  // Helper method to construct Kubernetes API path from resource details
+  private constructK8sApiPath(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string): string {
+    // Parse the apiVersion to extract group and version
+    const [group, version] = apiVersion.includes('/') ? apiVersion.split('/') : ['', apiVersion];
+    
+    // Convert kind to the plural resource name (this is a simple conversion, might need refinement)
+    const resourceType = this.kindToResourceType(kind);
+    
+    if (group) {
+      return `/proxy/k8s/namespaces/${namespaceUrnId}/apis/${group}/${version}/namespaces/${namespaceName}/${resourceType}/${resourceName}`;
+    } else {
+      // Core API resources (like pods, services, etc.)
+      return `/proxy/k8s/namespaces/${namespaceUrnId}/api/${version}/namespaces/${namespaceName}/${resourceType}/${resourceName}`;
+    }
+  }
+
+  // Helper method to convert Kind to resource type (plural form used in API paths)
+  private kindToResourceType(kind: string): string {
+    const kindToResourceMap: { [key: string]: string } = {
+      'VirtualMachine': 'virtualmachines',
+      'TanzuKubernetesCluster': 'tanzukubernetesclusters',
+      'Cluster': 'clusters',
+      'Pod': 'pods',
+      'Service': 'services',
+      'Deployment': 'deployments',
+      'ConfigMap': 'configmaps',
+      'Secret': 'secrets',
+      'Namespace': 'namespaces',
+      // Add more mappings as needed
+    };
+
+    // If we have a direct mapping, use it
+    if (kindToResourceMap[kind]) {
+      return kindToResourceMap[kind];
+    }
+
+    // Otherwise, convert to lowercase and add 's' (basic pluralization)
+    // This is a fallback and may not work for all resource types
+    return kind.toLowerCase() + 's';
+  }
+
+  // Supervisor Resource Manifest Management
+  async getSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      const apiPath = this.constructK8sApiPath(namespaceUrnId, namespaceName, resourceName, apiVersion, kind);
+      this.logger.info(`Fetching supervisor resource manifest for ${resourceName}`, {
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        kind,
+        apiPath,
+        instanceName,
+      });
+      return await this.makeAuthorizedRequest(apiPath, instanceName);
+    } catch (error) {
+      this.logger.error(`Failed to get supervisor resource manifest for ${resourceName} in namespace ${namespaceName}`, {
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        kind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
+
+  async updateSupervisorResourceManifest(namespaceUrnId: string, namespaceName: string, resourceName: string, apiVersion: string, kind: string, manifest: any, instanceName?: string): Promise<any | VcfErrorResponse> {
+    try {
+      const apiPath = this.constructK8sApiPath(namespaceUrnId, namespaceName, resourceName, apiVersion, kind);
+      this.logger.info(`Updating supervisor resource manifest for ${resourceName}`, {
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        kind,
+        apiPath,
+        instanceName,
+      });
+
+      return await this.makeAuthorizedRequest(
+        apiPath,
+        instanceName,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(manifest),
+        }
+      );
+    } catch (error) {
+      this.logger.error(`Failed to update supervisor resource manifest for ${resourceName} in namespace ${namespaceName}`, {
+        namespaceUrnId,
+        namespaceName,
+        resourceName,
+        apiVersion,
+        kind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { error: 'Service temporarily unavailable', status: 'error' };
+    }
+  }
 } 
