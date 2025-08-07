@@ -14,6 +14,7 @@ The plugins support Aria Automation 8.x as well as VCF Automation 9.x, including
 - **Entity Integration**: Seamless catalog entity synchronization with proper entity relationships
 - **Status Tracking**: Real-time deployment and resource status with live Kubernetes object monitoring
 - **YAML Visualization**: Beautiful syntax-highlighted YAML rendering for Kubernetes manifests
+- **YAML Editing**: Interactive YAML editing capabilities for CCI Supervisor resources with Monaco Editor
 
 ## Screenshots
 
@@ -70,6 +71,28 @@ The plugins support Aria Automation 8.x as well as VCF Automation 9.x, including
 #### Live Kubernetes Object Manifest
 ![CCI Supervisor Resource Details 6](../../images/vcfa-cci-resource-details-6.png)
 
+### CCI Supervisor Resource YAML Editing (VCFA 9 All Apps Orgs)
+The VCF Automation plugin provides powerful YAML editing capabilities for CCI Supervisor resources, allowing users to directly modify Kubernetes resource manifests through a professional Monaco Editor interface.
+
+#### Edit Resource Manifest Button (Overview Page)
+For CCI resources (both standalone and deployment-managed) with proper permissions, an "Edit Resource Manifest" button appears in the resource overview page, providing quick access to the YAML editor modal.
+
+#### YAML Editor Modal (Overview Page)
+![CCI YAML Editor Modal](../../images/vcfa-cci-yaml-editor-modal.png)
+The modal includes:
+- **Monaco Editor**: Professional code editor with YAML syntax highlighting
+- **Real-time Validation**: Live YAML syntax validation with error feedback
+- **Fixed Status Bar**: Validation status remains visible at the bottom
+- **Save Confirmation**: Confirmation dialog before applying changes
+
+#### Edit Manifest Tab (Details Page)  
+![CCI YAML Editor Tab](../../images/vcfa-cci-yaml-editor-tab.png)
+The dedicated "Edit Manifest" tab provides:
+- **Integrated Editor**: Monaco Editor embedded directly in the details page
+- **Auto-loading**: Manifest automatically loads when tab is selected
+- **Full-height Editor**: Optimized for comfortable editing experience
+- **Inline Actions**: Save and Cancel buttons within the tab interface
+
 ## Plugin Components
 
 ### Frontend Plugin
@@ -120,8 +143,8 @@ The plugin provides a backend that:
 ### CCI Components (New)
 - `VCFAutomationCCINamespaceOverview`: CCI Supervisor Namespace overview with VM classes, storage classes, and zones
 - `VCFAutomationCCINamespaceDetails`: Detailed CCI Supervisor Namespace information with status tables
-- `VCFAutomationCCIResourceOverview`: CCI Supervisor Resource overview with manifest and object data
-- `VCFAutomationCCIResourceDetails`: Detailed CCI Supervisor Resource with tabbed views and YAML rendering
+- `VCFAutomationCCIResourceOverview`: CCI Supervisor Resource overview with manifest and object data, including YAML editing modal
+- `VCFAutomationCCIResourceDetails`: Detailed CCI Supervisor Resource with tabbed views, YAML rendering, and integrated YAML editor tab
 
 ### Entity Types Created
 

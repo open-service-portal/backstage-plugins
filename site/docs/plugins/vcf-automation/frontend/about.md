@@ -33,6 +33,13 @@ The VCF Automation plugin for Backstage provides visibility into VCF deployments
 - Secure access control
 - Role-based permissions
 
+### CCI Supervisor Resource Management
+- Interactive YAML editing for standalone CCI resources
+- Monaco Editor integration with syntax highlighting
+- Real-time YAML validation and error feedback
+- Modal and tab-based editing interfaces
+- Permission-controlled access to editing capabilities
+
 ## Components
 
 The plugin provides several components for different entity types:
@@ -52,6 +59,12 @@ The plugin provides several components for different entity types:
 ### Generic Resource Components
 - `VCFAutomationGenericResourceOverview`: Resource summary
 - `VCFAutomationGenericResourceDetails`: Detailed resource information
+
+### CCI Supervisor Components
+- `VCFAutomationCCINamespaceOverview`: CCI Supervisor Namespace overview with resource summaries
+- `VCFAutomationCCINamespaceDetails`: Detailed CCI Supervisor Namespace configuration and status
+- `VCFAutomationCCIResourceOverview`: CCI Supervisor Resource overview with YAML editing modal
+- `VCFAutomationCCIResourceDetails`: Detailed CCI Supervisor Resource with integrated YAML editor tab
 
 ## Entity Integration
 
@@ -94,6 +107,34 @@ apiVersion: backstage.io/v1alpha1
 kind: Domain
 metadata:
   name: my-project
+```
+
+### CCI Supervisor Namespace Component
+```yaml
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-cci-namespace
+  annotations:
+    terasky.backstage.io/vcf-automation-resource-origin: 'STANDALONE'
+spec:
+  type: CCI.Supervisor.Namespace
+  domain: my-project  # References parent project
+```
+
+### CCI Supervisor Resource Component  
+```yaml
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: my-cci-resource
+  annotations:
+    terasky.backstage.io/vcf-automation-resource-origin: 'STANDALONE'
+    terasky.backstage.io/vcf-automation-cci-resource-manifest: '{"apiVersion":"v1","kind":"ConfigMap",...}'
+    terasky.backstage.io/vcf-automation-cci-resource-object: '{"apiVersion":"v1","kind":"ConfigMap",...}'
+spec:
+  type: CCI.Supervisor.Resource
+  subcomponentOf: my-cci-namespace  # References parent namespace
 ```
 
 ## Links
