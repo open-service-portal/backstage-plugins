@@ -4,6 +4,7 @@ import { useApi } from '@backstage/core-plugin-api';
 import { usePermission } from '@backstage/plugin-permission-react';
 import { useAsync } from 'react-use';
 import Editor from '@monaco-editor/react';
+import { catalogApiRef } from '@backstage/plugin-catalog-react';
 import {
   InfoCard,
   StructuredMetadataTable,
@@ -136,6 +137,7 @@ export const VCFAutomationCCIResourceDetails = () => {
   const { entity } = useEntity();
   const [tabValue, setTabValue] = useState(0);
   const api = useApi(vcfAutomationApiRef);
+  const catalogApi = useApi(catalogApiRef);
 
   // Permission check for supervisor resource editing
   const { allowed: canEditResource } = usePermission({
@@ -278,12 +280,63 @@ export const VCFAutomationCCIResourceDetails = () => {
   const namespaceName = manifest?.metadata?.namespace || objectData?.metadata?.namespace;
   const apiVersion = manifest?.apiVersion || objectData?.apiVersion;
   
-  // For standalone resources, extract namespace URN ID
-  const namespaceUrnId = useMemo(() => {
-    if (!isStandalone || !namespaceName) return undefined;
-    const contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
-    return contextData?.namespaceUrnId || namespaceName;
-  }, [isStandalone, namespaceName, resourceContext]);
+  // Helper function to extract namespace URN ID from CCI namespace endpoint annotation
+  const extractNamespaceUrnId = useCallback((endpoint: string): string | undefined => {
+    // Parse: https://polo-vra.terasky.local/proxy/k8s/namespaces/urn:vcloud:namespace:0a354079-dfe4-4bf9-bce0-4fd87fbffc25
+    const match = endpoint.match(/\/namespaces\/(urn:vcloud:namespace:[^\/]+)/);
+    return match ? match[1] : undefined;
+  }, []);
+
+  // Recursive function to find CCI Supervisor Namespace parent component (up to 3 levels deep)
+  const findCCINamespaceParent = useCallback(async (currentEntity: any, depth = 0): Promise<string | undefined> => {
+    if (depth >= 3) return undefined; // Max 3 levels deep
+    
+    // Check if current entity is a CCI Supervisor Namespace
+    if (currentEntity.spec?.type === 'CCI.Supervisor.Namespace') {
+      const endpoint = currentEntity.metadata?.annotations?.['terasky.backstage.io/vcf-automation-cci-namespace-endpoint'];
+      if (endpoint) {
+        return extractNamespaceUrnId(endpoint);
+      }
+    }
+    
+    // Look for parent component
+    const parentRef = currentEntity.spec?.subcomponentOf;
+    if (!parentRef) return undefined;
+    
+    try {
+      // Get parent entity from catalog
+      const parentEntity = await catalogApi.getEntityByRef(parentRef);
+      if (parentEntity) {
+        return await findCCINamespaceParent(parentEntity, depth + 1);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch parent entity:', parentRef, error);
+    }
+    
+    return undefined;
+  }, [catalogApi, extractNamespaceUrnId]);
+
+  // For CCI resources, extract namespace URN ID from context (standalone) or parent hierarchy (deployment-managed)
+  const { value: namespaceUrnId } = useAsync(async () => {
+    if (!namespaceName) return undefined;
+    
+    if (isStandalone) {
+      // For standalone resources, try to extract from resource context
+      let contextData = null;
+      try {
+        contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
+      } catch (error) {
+        console.log('Debug - Resource context is not JSON, treating as string:', resourceContext);
+        contextData = null;
+      }
+      
+      return contextData?.namespaceUrnId || namespaceName;
+    } else {
+      // For deployment-managed resources, traverse parent hierarchy to find CCI Supervisor Namespace
+      const urnId = await findCCINamespaceParent(entity);
+      return urnId || namespaceName; // Fallback to namespace name if not found
+    }
+  }, [namespaceName, resourceContext, isStandalone, entity, findCCINamespaceParent]);
 
   // Load manifest for editing
   const loadManifestForEditing = useCallback(async () => {
@@ -658,7 +711,7 @@ export const VCFAutomationCCIResourceDetails = () => {
             <Tab label="Object Status" />
             <Tab label="Conditions" />
             <Tab label="YAML Views" />
-            {canEditResource && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+            {canEditResource && resourceName && namespaceName && namespaceUrnId && apiVersion && (
               <Tab label="Edit Manifest" />
             )}
           </Tabs>
@@ -837,7 +890,7 @@ export const VCFAutomationCCIResourceDetails = () => {
           </TabPanel>
 
           {/* YAML Editor Tab */}
-          {canEditResource && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+          {canEditResource && resourceName && namespaceName && namespaceUrnId && apiVersion && (
             <TabPanel value={tabValue} index={5}>
               <Grid container spacing={3}>
                 <Grid item xs={12}>

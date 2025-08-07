@@ -5,6 +5,7 @@ import { usePermission } from '@backstage/plugin-permission-react';
 import { vcfAutomationApiRef } from '../api/VcfAutomationClient';
 import { supervisorResourceEditPermission } from '@terasky/backstage-plugin-vcf-automation-common';
 import Editor from '@monaco-editor/react';
+import { catalogApiRef } from '@backstage/plugin-catalog-react';
 import {
   InfoCard,
   StructuredMetadataTable,
@@ -98,6 +99,7 @@ export const VCFAutomationCCIResourceOverview = () => {
   const classes = useStyles();
   const { entity } = useEntity();
   const api = useApi(vcfAutomationApiRef);
+  const catalogApi = useApi(catalogApiRef);
 
   // Permission check for supervisor resource editing
   const { allowed: canEditResource } = usePermission({
@@ -232,26 +234,80 @@ export const VCFAutomationCCIResourceOverview = () => {
   // For backward compatibility, keep vmName for power management
   const vmName = resourceName;
   
-  // For standalone VMs, we need the namespace URN ID from the supervisor namespace
-  // This is stored in the resource context during ingestion
-  const namespaceUrnId = useMemo(() => {
-    if (!isStandalone || !namespaceName) return undefined;
+  // Helper function to extract namespace URN ID from CCI namespace endpoint annotation
+  const extractNamespaceUrnId = useCallback((endpoint: string): string | undefined => {
+    // Parse: https://polo-vra.terasky.local/proxy/k8s/namespaces/urn:vcloud:namespace:0a354079-dfe4-4bf9-bce0-4fd87fbffc25
+    const match = endpoint.match(/\/namespaces\/(urn:vcloud:namespace:[^\/]+)/);
+    return match ? match[1] : undefined;
+  }, []);
+
+  // Recursive function to find CCI Supervisor Namespace parent component (up to 3 levels deep)
+  const findCCINamespaceParent = useCallback(async (currentEntity: any, depth = 0): Promise<string | undefined> => {
+    if (depth >= 3) return undefined; // Max 3 levels deep
     
-    // Extract the URN ID from the resource context (stored during ingestion)
-    const contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
-    const urnId = contextData?.namespaceUrnId || namespaceName; // Fallback to namespace name if URN not available
+    // Check if current entity is a CCI Supervisor Namespace
+    if (currentEntity.spec?.type === 'CCI.Supervisor.Namespace') {
+      const endpoint = currentEntity.metadata?.annotations?.['terasky.backstage.io/vcf-automation-cci-namespace-endpoint'];
+      if (endpoint) {
+        return extractNamespaceUrnId(endpoint);
+      }
+    }
     
-    // Debug logging to help troubleshoot
-    console.log('Debug - Standalone VM URN ID resolution:', {
-      namespaceName,
-      resourceContext,
-      contextData,
-      urnId,
-      isStandalone,
-    });
+    // Look for parent component
+    const parentRef = currentEntity.spec?.subcomponentOf;
+    if (!parentRef) return undefined;
     
-    return urnId;
-  }, [isStandalone, namespaceName, resourceContext]);
+    try {
+      // Get parent entity from catalog
+      const parentEntity = await catalogApi.getEntityByRef(parentRef);
+      if (parentEntity) {
+        return await findCCINamespaceParent(parentEntity, depth + 1);
+      }
+    } catch (error) {
+      console.warn('Failed to fetch parent entity:', parentRef, error);
+    }
+    
+    return undefined;
+  }, [catalogApi, extractNamespaceUrnId]);
+
+  // For CCI resources, we need the namespace URN ID from the supervisor namespace
+  // For standalone: stored in resource context, for deployment-managed: found via parent component hierarchy
+  const { value: namespaceUrnId } = useAsync(async () => {
+    if (!namespaceName) return undefined;
+    
+    if (isStandalone) {
+      // For standalone resources, try to extract from resource context
+      let contextData = null;
+      try {
+        contextData = typeof resourceContext === 'string' ? JSON.parse(resourceContext || '{}') : resourceContext;
+      } catch (error) {
+        console.log('Debug - Resource context is not JSON, treating as string:', resourceContext);
+        contextData = null;
+      }
+      
+      const urnId = contextData?.namespaceUrnId || namespaceName;
+      console.log('Debug - Standalone CCI Resource URN ID resolution:', {
+        namespaceName,
+        resourceContext,
+        contextData,
+        urnId,
+      });
+      
+      return urnId;
+    } else {
+      // For deployment-managed resources, traverse parent hierarchy to find CCI Supervisor Namespace
+      console.log('Debug - Looking for CCI Supervisor Namespace parent for deployment-managed resource');
+      const urnId = await findCCINamespaceParent(entity);
+      
+      console.log('Debug - Deployment-managed CCI Resource URN ID resolution:', {
+        namespaceName,
+        urnId,
+        entityRef: entity.metadata.name,
+      });
+      
+      return urnId || namespaceName; // Fallback to namespace name if not found
+    }
+  }, [namespaceName, resourceContext, isStandalone, entity, findCCINamespaceParent]);
 
   // Handle edit resource manifest action
   const handleEditResource = useCallback(async () => {
@@ -504,7 +560,7 @@ export const VCFAutomationCCIResourceOverview = () => {
         )}
 
         {/* Edit Resource Manifest for VirtualMachine resources with permission */}
-        {canEditResource && vmOrganizationType === 'all-apps' && resourceKind === 'VirtualMachine' && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+        {canEditResource && vmOrganizationType === 'all-apps' && resourceKind === 'VirtualMachine' && resourceName && namespaceName && namespaceUrnId && apiVersion && (
           <Grid item xs={12}>
             <Box mt={vmOrganizationType === 'all-apps' ? 0 : 2}>
               {vmOrganizationType !== 'all-apps' && (
@@ -527,7 +583,7 @@ export const VCFAutomationCCIResourceOverview = () => {
         )}
 
         {/* Edit Resource Manifest for non-VirtualMachine resources with permission */}
-        {canEditResource && (resourceKind !== 'VirtualMachine' || vmOrganizationType !== 'all-apps') && isStandalone && resourceName && namespaceName && namespaceUrnId && apiVersion && (
+        {canEditResource && (resourceKind !== 'VirtualMachine' || vmOrganizationType !== 'all-apps') && resourceName && namespaceName && namespaceUrnId && apiVersion && (
           <Grid item xs={12}>
             <Typography variant="h6" className={classes.sectionTitle}>
               Resource Management
