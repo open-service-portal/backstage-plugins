@@ -128,7 +128,7 @@ export function createCrdTemplateAction({config}: {config: any}) {
       input.clusters.forEach((cluster: string) => {
         const filePath = path.join(
           cluster,
-          (input.parameters as any)[input.namespaceParam || 'namespace'],
+          (input.parameters as any)[input.namespaceParam || 'namespace'] || "",
           input.kind,
           `${(input.parameters as any)[input.nameParam]}.yaml`
         );
