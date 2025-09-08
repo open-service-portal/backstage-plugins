@@ -7,7 +7,6 @@
  */
 
 import { createBackend } from '@backstage/backend-defaults';
-
 const backend = createBackend();
 
 backend.add(import('@backstage/plugin-app-backend'));
@@ -51,7 +50,7 @@ backend.add(import('@backstage/plugin-kubernetes-backend'));
 
 // Custom
 backend.add(import('@backstage-community/plugin-rbac-backend'));
-//backend.add(import('@terasky/backstage-plugin-kubernetes-ingestor'));
+backend.add(import('@terasky/backstage-plugin-kubernetes-ingestor'));
 backend.add(import('@roadiehq/scaffolder-backend-module-utils/new-backend'));
 backend.add(import('@backstage-community/scaffolder-backend-module-regex'));
 backend.add(import('@backstage/plugin-scaffolder-backend-module-github'));
