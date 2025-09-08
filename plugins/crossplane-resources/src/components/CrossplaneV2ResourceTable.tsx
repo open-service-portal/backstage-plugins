@@ -228,16 +228,56 @@ interface K8sEvent {
 }
 
 const removeManagedFields = (resource: KubernetesObject) => {
-  const resourceCopy = JSON.parse(JSON.stringify(resource));
+  const resourceCopy = JSON.parse(JSON.stringify(resource)); // Deep copy the resource
+  
+  // Create a new object with the desired field order
+  const orderedResource: any = {
+      apiVersion: resourceCopy.apiVersion,
+      kind: resourceCopy.kind,
+      metadata: {}
+  };
+
+  // Order metadata fields
   if (resourceCopy.metadata) {
-    if (resourceCopy.metadata.managedFields) {
-      delete resourceCopy.metadata.managedFields;
-    }
-    if (resourceCopy.metadata.annotations && resourceCopy.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]) {
-      delete resourceCopy.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"];
-    }
+      // Remove managed fields
+      if (resourceCopy.metadata.managedFields) {
+          delete resourceCopy.metadata.managedFields;
+      }
+      if (resourceCopy.metadata.annotations && resourceCopy.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]) {
+          delete resourceCopy.metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"];
+      }
+
+      // Add metadata fields in order
+      if (resourceCopy.metadata.name) {
+          orderedResource.metadata.name = resourceCopy.metadata.name;
+      }
+      if (resourceCopy.metadata.namespace) {
+          orderedResource.metadata.namespace = resourceCopy.metadata.namespace;
+      }
+      if (resourceCopy.metadata.annotations && Object.keys(resourceCopy.metadata.annotations).length > 0) {
+          orderedResource.metadata.annotations = resourceCopy.metadata.annotations;
+      }
+      if (resourceCopy.metadata.labels && Object.keys(resourceCopy.metadata.labels).length > 0) {
+          orderedResource.metadata.labels = resourceCopy.metadata.labels;
+      }
+
+      // Add any remaining metadata fields
+      Object.entries(resourceCopy.metadata).forEach(([key, value]) => {
+          if (!['name', 'namespace', 'annotations', 'labels', 'managedFields'].includes(key)) {
+              orderedResource.metadata[key] = value;
+          }
+      });
   }
-  return resourceCopy;
+
+  // Add spec and status
+  if (resourceCopy.spec) {
+      orderedResource.spec = resourceCopy.spec;
+  }
+  if (resourceCopy.status) {
+      orderedResource.status = resourceCopy.status;
+  }
+
+  return orderedResource;
 };
 
 const CrossplaneV2ResourceTable = () => {
@@ -1283,6 +1323,17 @@ const CrossplaneV2ResourceTable = () => {
       const resourceType = resource.kind === 'Function' ? 'functions' : 'providers';
       const versionPath = /^v\d$/.test(version) ? '' : `/${version}`;
       const marketplaceUrl = `https://marketplace.upbound.io/${resourceType}/${org}/${name}${versionPath}`;
+      return (
+        <Link href={marketplaceUrl} target="_blank" rel="noopener noreferrer" style={{ color: theme.palette.text.primary, textDecoration: 'underline' }}>
+          {packageName}
+        </Link>
+      );
+    }
+    if ((resource.kind === 'Function' || resource.kind === 'Provider') && packageName.startsWith('xpkg.crossplane.io/crossplane-contrib')) {
+      const [_, path] = packageName.split('xpkg.crossplane.io/crossplane-contrib/');
+      const [name, version] = path.split(':');
+      const versionPath = /^v\d$/.test(version) ? '' : `/${version}`;
+      const marketplaceUrl = `https://github.com/crossplane-contrib/${name}/tree/${versionPath}`;
       return (
         <Link href={marketplaceUrl} target="_blank" rel="noopener noreferrer" style={{ color: theme.palette.text.primary, textDecoration: 'underline' }}>
           {packageName}
