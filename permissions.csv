@@ -15,10 +15,10 @@ p, role:default/platformteam, catalog.location.analyze, use, allow
 p, role:default/platformteam, kubernetes.proxy, use, allow
 p, role:default/platformteam, kubernetes.resources.read, read, allow
 p, role:default/platformteam, kubernetes.clusters.read, read, allow
-p, role:default/platformteam, policy-entity, read, allow
-p, role:default/platformteam, policy-entity, create, allow
-p, role:default/platformteam, policy-entity, update, allow
-p, role:default/platformteam, policy-entity, delete, allow
+p, role:default/platformteam, policy.entity.read, read, allow
+p, role:default/platformteam, policy.entity.create, create, allow
+p, role:default/platformteam, policy.entity.update, update, allow
+p, role:default/platformteam, policy.entity.delete, delete, allow
 p, role:default/platformteam, scaffolder-action, use, allow
 p, role:default/platformteam, scaffolder-template, use, allow
 p, role:default/platformteam, scaffolder.task.read, read, allow
