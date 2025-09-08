@@ -43,7 +43,7 @@ export function createCrdTemplateAction({config}: {config: any}) {
         ownerParam: z => z.any(),
         parameters: z => z.record(z.any()),
         nameParam: z => z.string(),
-        namespaceParam: z => z.string().optional(),
+        namespaceParam: z => z.string().describe('Template parameter to map to the namespace of the resource').default('xrNamespace'),
         excludeParams: z => z.array(z.string()),
         apiVersion: z => z.string(),
         kind: z => z.string(),
@@ -92,7 +92,7 @@ export function createCrdTemplateAction({config}: {config: any}) {
           ? (input.parameters as any).basePath 
           : (input.parameters as any).manifestLayout === 'namespace-scoped'
             ? `${(input.parameters as any)[input.namespaceParam || 'namespace']}`
-            : `${input.clusters[0]}/${(input.parameters as any)[input.namespaceParam || 'namespace']}/${input.kind}`
+            : `${input.clusters[0]}/cluster-scoped/${input.kind}`
       }
       let sourceFileUrl = '';
       if ((input.parameters as any).pushToGit && sourceInfo.gitRepo) {
@@ -126,9 +126,12 @@ export function createCrdTemplateAction({config}: {config: any}) {
       // Handle cluster-specific paths or default path
       const filePaths: string[] = [];
       input.clusters.forEach((cluster: string) => {
+        const namespaceOrDefault = (input.parameters as any)[input.namespaceParam] && (input.parameters as any)[input.namespaceParam] !== 'xrNamespace' && (input.parameters as any)[input.namespaceParam] !== ''
+          ? (input.parameters as any)[input.namespaceParam]
+          : 'cluster-scoped';
         const filePath = path.join(
           cluster,
-          (input.parameters as any)[input.namespaceParam || 'namespace'] || "",
+          namespaceOrDefault,
           input.kind,
           `${(input.parameters as any)[input.nameParam]}.yaml`
         );

@@ -80,6 +80,8 @@ Workload Resource Annotations:
   terasky.backstage.io/consumesApis: string
   terasky.backstage.io/component-annotations: string
   terasky.backstage.io/links: string
+  terasky.backstage.io/title: string
+  terasky.backstage.io/name: string
 ```
 
 ## Getting Started
