@@ -12,7 +12,7 @@ export const devpodPlugin = createFrontendPlugin({
       name: 'devpod',
       params: {
         filter: isDevpodAvailable,
-        loader: () => import('./components/DevpodComponent/DevpodComponent').then(m => < m.DevpodComponent />),
+        loader: () => import('./components/DevpodComponent/DevpodComponent').then(m => <m.DevpodComponent />),
       },
       disabled: false
     }),
