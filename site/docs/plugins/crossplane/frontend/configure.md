@@ -2,6 +2,17 @@
 
 This guide covers the configuration options and best practices for the Crossplane Resources frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The configuration in `app-config.yaml` is still respected:
+
+```yaml
+crossplane:
+  enablePermissions: false # Whether to enable permission checks for the crossplane plugin
+```
+
+The plugin will be automatically integrated into the appropriate entity pages without requiring manual route configuration.
+
 ## Configuration Options
 
 ### Basic Configuration

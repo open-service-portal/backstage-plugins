@@ -50,6 +50,25 @@ const overviewContent = (
 );
 ```
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { devpodPlugin } from '@terasky/backstage-plugin-devpod/alpha';
+
+export default createApp({
+  features: [
+    ...
+    devpodPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## Verification
 
 After installation, verify that:

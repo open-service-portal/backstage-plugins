@@ -2,6 +2,22 @@
 
 This guide covers the configuration options available for the ScaleOps frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The configuration in `app-config.yaml` is still respected:
+
+```yaml
+scaleops:
+  baseUrl: 'https://your-scaleops-instance.com'
+  linkToDashboard: true
+  authentication:
+    enabled: true
+    user: 'YOUR_USERNAME'
+    password: 'YOUR_PASSWORD'
+```
+
+The plugin will be automatically integrated into the appropriate entity pages without requiring manual route configuration.
+
 ## Configuration File
 
 The plugin is configured through your `app-config.yaml`. Here's a comprehensive example:

@@ -2,6 +2,10 @@
 
 This guide covers how to configure and customize the VCF Operations Frontend plugin for your organization's needs.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The configuration options described below are still available and can be customized through the app configuration.
+
 ## Basic Configuration
 
 The frontend plugin automatically inherits configuration from the backend plugin, but you can customize the user experience through various options.

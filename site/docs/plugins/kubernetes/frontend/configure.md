@@ -2,6 +2,21 @@
 
 This guide covers the configuration options available for the Kubernetes Resources frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The configuration in `app-config.yaml` is still respected:
+
+```yaml
+kubernetesResources:
+  # Whether to enable permission checks
+  enablePermissions: true
+  
+  # Maximum concurrent requests to Kubernetes API
+  concurrency: 10
+```
+
+The plugin will be automatically integrated into the appropriate entity pages without requiring manual route configuration.
+
 ## Configuration File
 
 The plugin is configured through your `app-config.yaml`. Here's a comprehensive example:

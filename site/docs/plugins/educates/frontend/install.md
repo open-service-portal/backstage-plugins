@@ -52,6 +52,25 @@ export const Root = () => (
 );
 ```
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { educatesPlugin } from '@terasky/backstage-plugin-educates/alpha';
+
+export default createApp({
+  features: [
+    ...
+    educatesPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `App.tsx` and `Root.tsx` files. The plugin will be automatically integrated into the navigation.
+
 ## Verification
 
 After installation, verify that:

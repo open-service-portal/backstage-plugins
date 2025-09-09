@@ -1,6 +1,6 @@
 {
   "name": "@terasky/backstage-plugin-educates",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "configSchema": "config.d.ts",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@backstage/core-components": "^0.17.5",
     "@backstage/core-plugin-api": "^1.10.9",
+    "@backstage/frontend-plugin-api": "^0.11.0",
     "@backstage/theme": "^0.6.8",
     "@material-ui/core": "^4.12.4",
     "@material-ui/icons": "^4.9.1",
@@ -62,5 +63,20 @@
   "files": [
     "dist",
     "config.d.ts"
-  ]
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./alpha": "./src/alpha.tsx",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "alpha": [
+        "src/alpha.tsx"
+      ],
+      "package.json": [
+        "package.json"
+      ]
+    }
+  }
 }

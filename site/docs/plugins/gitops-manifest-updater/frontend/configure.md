@@ -2,6 +2,10 @@
 
 This guide covers the configuration options available for the GitOps Manifest Updater frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The plugin will be automatically integrated into the appropriate locations without requiring manual route configuration.
+
 ### Example Configuration for GitHub based SCM
 ```yaml
 apiVersion: scaffolder.backstage.io/v1beta3

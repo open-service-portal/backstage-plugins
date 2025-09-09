@@ -2,6 +2,10 @@
 
 This guide covers the configuration options available for the Entity Scaffolder Content frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The configuration options described below are still available and can be customized through the app configuration.
+
 ## Component Configuration
 
 ### EntityScaffolderContent Props

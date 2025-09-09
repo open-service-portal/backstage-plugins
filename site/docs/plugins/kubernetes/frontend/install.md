@@ -89,6 +89,25 @@ annotations:
   backstage.io/managed-by-origin-location: 'cluster-name'
 ```
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { kubernetesResourcesPlugin } from '@terasky/backstage-plugin-kubernetes-resources-frontend/alpha';
+
+export default createApp({
+  features: [
+    ...
+    kubernetesResourcesPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## Verification
 
 After installation, verify that:
