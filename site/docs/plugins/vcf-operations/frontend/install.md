@@ -143,6 +143,25 @@ If styling appears broken:
 3. Verify CSS import order
 4. Test with default Backstage theme
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { vcfOperationsPlugin } from '@terasky/backstage-plugin-vcf-operations/alpha';
+
+export default createApp({
+  features: [
+    ...
+    vcfOperationsPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## Next Steps
 
 After successful installation:

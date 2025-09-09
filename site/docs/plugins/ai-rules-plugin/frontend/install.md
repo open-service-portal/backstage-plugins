@@ -103,6 +103,25 @@ The plugin looks for rules in these locations:
 - **GitHub Copilot Rules**: `.github/copilot-instructions.md`
 - **Cline Rules**: `.clinerules/*.md`
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { aiRulesPlugin } from '@terasky/backstage-plugin-ai-rules/alpha';
+
+export default createApp({
+  features: [
+    ...
+    aiRulesPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## Verification
 
 After installation, verify that:

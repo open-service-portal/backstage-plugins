@@ -298,6 +298,25 @@ The permission is defined in the `vcf-automation-common` plugin and automaticall
 
 The power management component is automatically included in `VCFAutomationCCIResourceOverview` for VirtualMachine entities in all-apps organizations. No additional configuration is required.
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { vcfAutomationPlugin } from '@terasky/backstage-plugin-vcf-automation/alpha';
+
+export default createApp({
+  features: [
+    ...
+    vcfAutomationPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## What's Next?
 
 - [Configure the plugin](configure.md)

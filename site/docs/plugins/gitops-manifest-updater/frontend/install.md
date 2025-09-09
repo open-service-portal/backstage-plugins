@@ -224,6 +224,25 @@ spec:
         url: data:application/yaml;charset=utf-8,${{ steps['read-file'].output.content }}
 ```
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { gitopsManifestUpdaterPlugin } from '@terasky/backstage-plugin-gitops-manifest-updater/alpha';
+
+export default createApp({
+  features: [
+    ...
+    gitopsManifestUpdaterPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `App.tsx` and other files. The plugin will be automatically integrated into the appropriate locations.
+
 ## Verification
 
 After installation, verify that:

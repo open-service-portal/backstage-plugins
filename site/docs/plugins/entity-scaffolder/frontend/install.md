@@ -54,6 +54,25 @@ const systemPage = (
 // Add similar configurations for other entity pages as needed
 ```
 
+## New Frontend System Support (Alpha)
+
+The plugin now supports the new frontend system available in the `/alpha` export. To use this:
+
+```typescript
+import { createApp } from '@backstage/frontend-defaults';
+import { entityScaffolderContentPlugin } from '@terasky/backstage-plugin-entity-scaffolder-content/alpha';
+
+export default createApp({
+  features: [
+    ...
+    entityScaffolderContentPlugin,
+    ...
+  ],
+});
+```
+
+This replaces the need for manual route configuration in `EntityPage.tsx` and other files. The plugin will be automatically integrated into the appropriate entity pages.
+
 ## Verification
 
 After installation, verify that:

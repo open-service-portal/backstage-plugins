@@ -2,6 +2,10 @@
 
 This guide covers the configuration options available for the Educates frontend plugin.
 
+## New Frontend System Configuration (Alpha)
+
+When using the new frontend system through the `/alpha` export, the plugin is configured automatically with sensible defaults. The plugin will be automatically integrated into the navigation without requiring manual route configuration.
+
 ## Configuration File
 
 The frontend plugin relies on the backend configuration. 
