@@ -1,31 +1,60 @@
+import {
+  KubernetesBuilder,
+  KubernetesObjectTypes,
+} from '@backstage/plugin-kubernetes-backend';
+import { CatalogApi } from '@backstage/catalog-client';
+import { PermissionEvaluator } from '@backstage/plugin-permission-common';
 import { Config } from '@backstage/config';
-import { LoggerService } from '@backstage/backend-plugin-api';
-import { DefaultKubernetesResourceFetcher } from '../services';
+import { LoggerService, DiscoveryService } from '@backstage/backend-plugin-api';
+import { ANNOTATION_KUBERNETES_AUTH_PROVIDER } from '@backstage/plugin-kubernetes-common';
+import { getAuthCredential } from '../auth';
 
 export class CRDDataProvider {
+  logger: LoggerService;
+  config: Config;
+  catalogApi: CatalogApi;
+  permissions: PermissionEvaluator;
+  discovery: DiscoveryService;
+
   constructor(
-    private readonly resourceFetcher: DefaultKubernetesResourceFetcher,
-    private readonly config: Config,
-    private readonly logger: LoggerService,
-  ) {}
+    logger: LoggerService,
+    config: Config,
+    catalogApi: CatalogApi,
+    discovery: DiscoveryService,
+    permissions: PermissionEvaluator,
+  ) {
+    this.logger = logger;
+    this.config = config;
+    this.catalogApi = catalogApi;
+    this.permissions = permissions;
+    this.discovery = discovery;
+  }
 
   async fetchCRDObjects(): Promise<any[]> {
     try {
-      // Get allowed clusters from config or discover them
-      const allowedClusters = this.config.getOptionalStringArray('kubernetesIngestor.allowedClusterNames');
-      let clusters: string[] = [];
-      
-      if (allowedClusters) {
-        clusters = allowedClusters;
-      } else {
-        try {
-          clusters = await this.resourceFetcher.getClusters();
-        } catch (error) {
-          this.logger.error('Failed to discover clusters:', error instanceof Error ? error : { error: String(error) });
-          return [];
+      const builder = KubernetesBuilder.createBuilder({
+        logger: this.logger,
+        config: this.config,
+        catalogApi: this.catalogApi,
+        permissions: this.permissions,
+        discovery: this.discovery,
+      });
+
+      const globalAuthStrategies = (global as any).kubernetesAuthStrategies;
+      if (globalAuthStrategies) {
+        for (const [key, strategy] of globalAuthStrategies) {
+          this.logger.debug(`Adding auth strategy: ${key}`);
+          builder.addAuthStrategy(key, strategy);
         }
       }
 
+      const { fetcher, clusterSupplier } = await builder.build();
+      const credentials = {
+        $$type: '@backstage/BackstageCredentials' as const,
+        principal: 'anonymous',
+      };
+
+      const clusters = await clusterSupplier.getClusters({ credentials });
       if (clusters.length === 0) {
         this.logger.warn('No clusters found.');
         return [];
@@ -49,8 +78,53 @@ export class CRDDataProvider {
       }
 
       const crdMap = new Map<string, any>();
-      for (const clusterName of clusters) {
+      const allowedClusters = this.config.getOptionalStringArray("kubernetesIngestor.allowedClusterNames");
+      for (const cluster of clusters) {
+        if (allowedClusters && !allowedClusters.includes(cluster.name)) {
+          this.logger.debug(`Skipping cluster: ${cluster.name} as it is not included in the allowedClusterNames configuration.`);
+          continue;
+        }
+        // Get the auth provider type from the cluster config
+        const authProvider =
+          cluster.authMetadata[ANNOTATION_KUBERNETES_AUTH_PROVIDER] ||
+          'serviceAccount';
+
+        // Get the auth credentials based on the provider type
+        let credential;
         try {
+          credential = await getAuthCredential(
+            cluster,
+            authProvider,
+            this.config,
+            this.logger,
+          );
+        } catch (error) {
+          if (error instanceof Error) {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              error,
+            );
+          } else {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              {
+                error: String(error),
+              },
+            );
+          }
+          continue;
+        }
+
+        try {
+          const objectTypesToFetch: Set<ObjectToFetch> = new Set([
+            {
+              group: 'apiextensions.k8s.io',
+              apiVersion: 'v1',
+              plural: 'customresourcedefinitions',
+              objectType: 'customresources' as KubernetesObjectTypes,
+            },
+          ]);
+
           let labelSelectorString = '';
           if (labelSelector) {
             const key = labelSelector.getString('key');
@@ -58,10 +132,13 @@ export class CRDDataProvider {
             labelSelectorString = `${key}=${value}`;
           }
 
-          const fetchedObjects = await this.resourceFetcher.fetchResources({
-            clusterName,
-            resourcePath: 'apiextensions.k8s.io/v1/customresourcedefinitions',
-            query: labelSelector ? { labelSelector: labelSelectorString } : undefined
+          const fetchedObjects = await fetcher.fetchObjectsForService({
+            serviceId: 'crdServiceId',
+            clusterDetails: cluster,
+            credential,
+            objectTypesToFetch,
+            labelSelector: labelSelectorString,
+            customResources: [],
           });
 
           if (crdTargets) {
@@ -71,16 +148,17 @@ export class CRDDataProvider {
               const plural = parts[0];
               const group = parts.slice(1).join('.');
 
-              const filteredCRDs = (fetchedObjects as any[])
+              const filteredCRDs = fetchedObjects.responses
+                .flatMap(response => response.resources)
                 .filter(
-                  (crd: any) =>
+                  crd =>
                     crd.spec.group === group &&
                     crd.spec.names.plural === plural,
                 )
                 .map(crd => ({
                   ...crd,
-                  clusterName,
-                  clusterEndpoint: clusterName,
+                  clusterName: cluster.name,
+                  clusterEndpoint: cluster.url,
                 }));
 
               filteredCRDs.forEach(crd => {
@@ -88,16 +166,16 @@ export class CRDDataProvider {
                 if (!crdMap.has(crdKey)) {
                   crdMap.set(crdKey, {
                     ...crd,
-                    clusters: [clusterName],
-                    clusterDetails: [{ name: clusterName, url: clusterName }],
+                    clusters: [cluster.name],
+                    clusterDetails: [{ name: cluster.name, url: cluster.url }],
                   });
                 } else {
                   const existingCrd = crdMap.get(crdKey);
-                  if (!existingCrd.clusters.includes(clusterName)) {
-                    existingCrd.clusters.push(clusterName);
+                  if (!existingCrd.clusters.includes(cluster.name)) {
+                    existingCrd.clusters.push(cluster.name);
                     existingCrd.clusterDetails.push({
-                      name: clusterName,
-                      url: clusterName,
+                      name: cluster.name,
+                      url: cluster.url,
                     });
                   }
                 }
@@ -105,27 +183,28 @@ export class CRDDataProvider {
             }
           } else {
             // Process CRDs based on label selector
-            const labeledCRDs = (fetchedObjects as any[])
-              .map((crd: any) => ({
+            const labeledCRDs = fetchedObjects.responses
+              .flatMap(response => response.resources)
+              .map(crd => ({
                 ...crd,
-                clusterName,
-                clusterEndpoint: clusterName,
+                clusterName: cluster.name,
+                clusterEndpoint: cluster.url,
               }));
             labeledCRDs.forEach(crd => {
               const crdKey = `${crd.spec.group}/${crd.spec.names.plural}`;
               if (!crdMap.has(crdKey)) {
                 crdMap.set(crdKey, {
                   ...crd,
-                  clusters: [clusterName],
-                  clusterDetails: [{ name: clusterName, url: clusterName }],
+                  clusters: [cluster.name],
+                  clusterDetails: [{ name: cluster.name, url: cluster.url }],
                 });
               } else {
                 const existingCrd = crdMap.get(crdKey);
-                if (!existingCrd.clusters.includes(clusterName)) {
-                  existingCrd.clusters.push(clusterName);
+                if (!existingCrd.clusters.includes(cluster.name)) {
+                  existingCrd.clusters.push(cluster.name);
                   existingCrd.clusterDetails.push({
-                    name: clusterName,
-                    url: clusterName,
+                    name: cluster.name,
+                    url: cluster.url,
                   });
                 }
               }
@@ -133,7 +212,7 @@ export class CRDDataProvider {
           }
         } catch (error) {
           this.logger.error(
-            `Failed to fetch CRD objects for cluster ${clusterName}: ${error}`,
+            `Failed to fetch CRD objects for cluster ${cluster.name}: ${error}`,
           );
         }
       }
@@ -145,3 +224,9 @@ export class CRDDataProvider {
   }
 }
 
+type ObjectToFetch = {
+  group: string;
+  apiVersion: string;
+  plural: string;
+  objectType: KubernetesObjectTypes;
+};

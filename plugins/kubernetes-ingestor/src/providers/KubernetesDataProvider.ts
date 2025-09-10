@@ -1,15 +1,44 @@
-import { Config } from '@backstage/config';
-import { LoggerService } from '@backstage/backend-plugin-api';
-import { DefaultKubernetesResourceFetcher } from '../services';
-import { XRDDataProvider } from './XRDDataProvider';
+import { Config, JsonObject } from '@backstage/config';
+import { LoggerService, AuthService, HttpAuthService } from '@backstage/backend-plugin-api';
+import { KubernetesBuilder } from '@backstage/plugin-kubernetes-backend';
+import { CatalogApi } from '@backstage/catalog-client';
+import { PermissionEvaluator } from '@backstage/plugin-permission-common';
+import {
+  DiscoveryService,
+  BackstageCredentials,
+} from '@backstage/backend-plugin-api';
+import {
+  KubernetesObjectTypes,
+  ClusterDetails,
+} from '@backstage/plugin-kubernetes-node';
+import pluralize from 'pluralize';
+import { ANNOTATION_KUBERNETES_AUTH_PROVIDER } from '@backstage/plugin-kubernetes-common';
+import { getAuthCredential } from '../auth';
 
+type ObjectToFetch = {
+  group: string;
+  apiVersion: string;
+  plural: string;
+  singular?: string;
+  objectType: KubernetesObjectTypes;
+};
+
+// Add new type definitions for auth providers
+type AuthProvider = 'serviceAccount' | 'google' | 'aws' | 'azure' | 'oidc';
+
+// Extend ClusterDetails to include authProvider
+interface ExtendedClusterDetails extends ClusterDetails {
+  authProvider?: AuthProvider;
+}
 
 export class KubernetesDataProvider {
-  constructor(
-    private readonly resourceFetcher: DefaultKubernetesResourceFetcher,
-    private readonly config: Config,
-    private readonly logger: LoggerService,
-  ) {}
+  logger: LoggerService;
+  config: Config;
+  catalogApi: CatalogApi;
+  permissions: PermissionEvaluator;
+  discovery: DiscoveryService;
+  auth?: AuthService;
+  httpAuth?: HttpAuthService;
 
   private getAnnotationPrefix(): string {
     return (
@@ -18,22 +47,50 @@ export class KubernetesDataProvider {
     );
   }
 
+  constructor(
+    logger: LoggerService,
+    config: Config,
+    catalogApi: CatalogApi,
+    permissions: PermissionEvaluator,
+    discovery: DiscoveryService,
+    auth?: AuthService,
+    httpAuth?: HttpAuthService,
+  ) {
+    this.logger = logger;
+    this.config = config;
+    this.catalogApi = catalogApi;
+    this.permissions = permissions;
+    this.discovery = discovery;
+    this.auth = auth;
+    this.httpAuth = httpAuth;
+  }
+
   async fetchKubernetesObjects(): Promise<any[]> {
     try {
-      // Get allowed clusters from config or discover them
-      const allowedClusters = this.config.getOptionalStringArray('kubernetesIngestor.allowedClusterNames');
-      let clusters: string[] = [];
-      
-      if (allowedClusters) {
-        clusters = allowedClusters;
-      } else {
-        try {
-          clusters = await this.resourceFetcher.getClusters();
-        } catch (error) {
-          this.logger.error('Failed to discover clusters:', error instanceof Error ? error : { error: String(error) });
-          return [];
+      const builder = KubernetesBuilder.createBuilder({
+        logger: this.logger,
+        config: this.config,
+        catalogApi: this.catalogApi,
+        permissions: this.permissions,
+        discovery: this.discovery,
+      });
+
+      const globalAuthStrategies = (global as any).kubernetesAuthStrategies;
+      if (globalAuthStrategies) {
+        for (const [key, strategy] of globalAuthStrategies) {
+          this.logger.debug(`Adding auth strategy: ${key}`);
+          builder.addAuthStrategy(key, strategy);
         }
       }
+
+      const { fetcher, clusterSupplier } = await builder.build();
+
+      const credentials: BackstageCredentials = {
+        $$type: '@backstage/BackstageCredentials',
+        principal: 'anonymous',
+      };
+
+      const clusters = await clusterSupplier.getClusters({ credentials });
 
       if (clusters.length === 0) {
         this.logger.warn('No clusters found.');
@@ -45,26 +102,30 @@ export class KubernetesDataProvider {
           'kubernetesIngestor.components.disableDefaultWorkloadTypes',
         ) ?? false;
 
-      const defaultWorkloadTypes = [
+      const defaultWorkloadTypes: ObjectToFetch[] = [
         {
           group: 'apps',
           apiVersion: 'v1',
           plural: 'deployments',
+          objectType: 'deployments',
         },
         {
           group: 'apps',
           apiVersion: 'v1',
           plural: 'statefulsets',
+          objectType: 'statefulsets',
         },
         {
           group: 'apps',
           apiVersion: 'v1',
           plural: 'daemonsets',
+          objectType: 'daemonsets',
         },
         {
           group: 'batch',
           apiVersion: 'v1',
           plural: 'cronjobs',
+          objectType: 'cronjobs',
         },
       ];
 
@@ -77,23 +138,41 @@ export class KubernetesDataProvider {
             group: type.getString('group'),
             apiVersion: type.getString('apiVersion'),
             plural: type.getString('plural'),
+            singular: type.getOptionalString('singular'),
+            objectType: type.getString('plural') as KubernetesObjectTypes,
           })) || [];
 
-      const workloadTypes = [
+      const objectTypesToFetch: Set<ObjectToFetch> = new Set([
         ...(disableDefaultWorkloadTypes ? [] : defaultWorkloadTypes),
         ...customWorkloadTypes,
-      ];
+      ]);
 
       const isCrossplaneEnabled = this.config.getOptionalBoolean('kubernetesIngestor.crossplane.enabled') ?? true;
 
       // Only add Crossplane-related objects if the feature is enabled
       if (isCrossplaneEnabled) {
-        // --- BEGIN: Add all v2/Cluster and v2/Namespaced composite kinds (XRs) to workloadTypes ---
+        // --- BEGIN: Add all v2/Cluster and v2/Namespaced composite kinds (XRs) to objectTypesToFetch ---
         try {
-          const xrdDataProvider = new XRDDataProvider(
-            this.resourceFetcher,
-            this.config,
+          // Import XrdDataProvider here to avoid circular dependency at top
+          const XrdDataProviderModule = await import('./XrdDataProvider');
+
+          // Access the default export from the module
+          // @ts-ignore
+          const { XrdDataProvider } = XrdDataProviderModule.default;
+
+          if (!XrdDataProvider || typeof XrdDataProvider !== 'function') {
+            throw new Error(`XrdDataProvider is not properly exported. Found type: ${typeof XrdDataProvider}`);
+          }
+
+          // You may need to pass auth/httpAuth if required by your XrdDataProvider constructor
+          const xrdDataProvider = new XrdDataProvider(
             this.logger,
+            this.config,
+            this.catalogApi,
+            this.discovery,
+            this.permissions,
+            this.auth,
+            this.httpAuth,
           );
           const xrdObjects = await xrdDataProvider.fetchXRDObjects();
           for (const xrd of xrdObjects) {
@@ -101,10 +180,11 @@ export class KubernetesDataProvider {
             const scope = xrd.spec?.scope || (isV2 ? 'LegacyCluster' : 'Cluster');
             if (isV2 && scope !== 'LegacyCluster') {
               for (const version of xrd.spec.versions || []) {
-                workloadTypes.push({
+                objectTypesToFetch.add({
                   group: xrd.spec.group,
                   apiVersion: version.name,
                   plural: xrd.spec.names.plural,
+                  objectType: 'customresources' as KubernetesObjectTypes,
                 });
               }
             }
@@ -114,23 +194,74 @@ export class KubernetesDataProvider {
         }
       }
 
+      const allowedClusters = this.config.getOptionalStringArray("kubernetesIngestor.allowedClusterNames");
       const onlyIngestAnnotatedResources = this.config.getOptionalBoolean('kubernetesIngestor.components.onlyIngestAnnotatedResources') ?? false;
       const excludedNamespaces = new Set(this.config.getOptionalStringArray('kubernetesIngestor.components.excludedNamespaces') || []);
       const ingestAllCrossplaneClaims = this.config.getOptionalBoolean('kubernetesIngestor.crossplane.claims.ingestAllClaims') ?? false;
+      const objectTypeMap: Record<string, ObjectToFetch> = {};
+      objectTypesToFetch.forEach(type => {
+        objectTypeMap[type.plural] = type;
+      });
 
       const allObjects: any[] = [];
 
-      for (const clusterName of clusters) {
+      for (const cluster of clusters as ExtendedClusterDetails[]) {
+        if (allowedClusters && !allowedClusters.includes(cluster.name)) {
+          this.logger.debug(`Skipping cluster: ${cluster.name} as it is not included in the allowedClusterNames configuration.`);
+          continue;
+        }
+        // Get the auth provider type from the cluster config
+        const authProvider =
+          cluster.authMetadata[ANNOTATION_KUBERNETES_AUTH_PROVIDER] ||
+          'serviceAccount';
+
+        // Get the auth credentials based on the provider type
+        let credential;
+        try {
+          credential = await getAuthCredential(
+            cluster,
+            authProvider,
+            this.config,
+            this.logger,
+          );
+        } catch (error) {
+          if (error instanceof Error) {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              error,
+            );
+          } else {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              {
+                error: String(error),
+              },
+            );
+          }
+          continue;
+        }
+
         try {
           // Only fetch Crossplane claims if enabled
           if (isCrossplaneEnabled && ingestAllCrossplaneClaims) {
-            const claimCRDs = await this.fetchCRDsForCluster(clusterName);
+            const claimCRDs = await this.fetchCRDsForCluster(
+              fetcher,
+              cluster,
+              credential,
+            );
             claimCRDs.forEach(crd => {
-              workloadTypes.push({
+              objectTypesToFetch.add({
                 group: crd.group,
                 apiVersion: crd.version,
                 plural: crd.plural,
+                objectType: 'customresources' as KubernetesObjectTypes,
               });
+              objectTypeMap[crd.plural] = {
+                group: crd.group,
+                apiVersion: crd.version,
+                plural: crd.plural,
+                objectType: 'customresources' as KubernetesObjectTypes,
+              };
             });
           }
 
@@ -142,107 +273,132 @@ export class KubernetesDataProvider {
               'kubernetesIngestor.genericCRDTemplates.crds',
             )
           ) {
-            const genericCRDs = await this.fetchGenericCRDs(clusterName);
+            const genericCRDs = await this.fetchGenericCRDs(
+              fetcher,
+              cluster,
+              credential,
+            );
             genericCRDs.forEach(crd => {
-              workloadTypes.push({
+              objectTypesToFetch.add({
                 group: crd.group,
                 apiVersion: crd.version,
                 plural: crd.plural,
+                objectType: 'customresources' as KubernetesObjectTypes,
               });
+              objectTypeMap[crd.plural] = {
+                group: crd.group,
+                apiVersion: crd.version,
+                plural: crd.plural,
+                objectType: 'customresources' as KubernetesObjectTypes,
+              };
             });
           }
 
-          const fetchedObjects = await Promise.all(
-            workloadTypes.map(async (type) => {
-              const resources = await this.resourceFetcher.fetchResources({
-                clusterName,
-                resourcePath: `${type.group}/${type.apiVersion}/${type.plural}`,
-              });
-              return resources.map((resource: any) => ({
-                ...resource,
-                apiVersion: `${type.group}/${type.apiVersion}`,
-                kind: resource.kind || type.plural.charAt(0).toUpperCase() + type.plural.slice(1, -1),
-              }));
-            })
-          );
+          const fetchedObjects = await fetcher.fetchObjectsForService({
+            serviceId: cluster.name,
+            clusterDetails: cluster,
+            credential,
+            objectTypesToFetch,
+            customResources: [],
+          });
           const prefix = this.getAnnotationPrefix();
-          const allFetchedObjects = fetchedObjects.flat();
-          const filteredObjects = allFetchedObjects
-            .filter((resource: any) => {
-              if (
-                resource.metadata.annotations?.[
-                  `${prefix}/exclude-from-catalog`
-                ]
-              ) {
-                return false;
-              }
+          const filteredObjects = await Promise.all(fetchedObjects.responses.flatMap(async response =>
+            response.resources
+              .filter(resource => {
+                if (
+                  resource.metadata.annotations?.[
+                    `${prefix}/exclude-from-catalog`
+                  ]
+                ) {
+                  return false;
+                }
 
-              if (onlyIngestAnnotatedResources) {
-                return resource.metadata.annotations?.[
-                  `${prefix}/add-to-catalog`
-                ];
-              }
+                if (onlyIngestAnnotatedResources) {
+                  return resource.metadata.annotations?.[
+                    `${prefix}/add-to-catalog`
+                  ];
+                }
 
-              return !excludedNamespaces.has(resource.metadata.namespace);
-            })
-            .map(async (resource: any) => {
-              // Skip Crossplane-related resources if disabled
-              if (!isCrossplaneEnabled) {
-                // Check if it's a Crossplane resource
-                if (resource.spec?.resourceRef || resource.spec?.crossplane) {
-                  this.logger.debug(`Skipping Crossplane resource: ${resource.kind} ${resource.metadata?.name}`);
+                return !excludedNamespaces.has(resource.metadata.namespace);
+              })
+              .map(async resource => {
+                let type = response.type as string;
+                if (response.type === 'customresources') {
+                  type = pluralize(resource.kind.toLowerCase());
+                }
+                const objectType = objectTypeMap[type];
+                if (
+                  objectType.group === null ||
+                  objectType.apiVersion === null
+                ) {
                   return {};
                 }
-              }
 
-              // Handle v2 composites: spec.crossplane.compositionRef.name
-              if (isCrossplaneEnabled && resource.spec?.crossplane?.compositionRef?.name) {
-                const composition = await this.fetchComposition(
-                  clusterName,
-                  resource.spec.crossplane.compositionRef.name,
-                );
-                const usedFunctions = this.extractUsedFunctions(composition);
+                // Skip Crossplane-related resources if disabled
+                if (!isCrossplaneEnabled) {
+                  // Check if it's a Crossplane resource
+                  if (resource.spec?.resourceRef || resource.spec?.crossplane) {
+                    this.logger.debug(`Skipping Crossplane resource: ${resource.kind} ${resource.metadata?.name}`);
+                    return {};
+                  }
+                }
+
+                // Handle v2 composites: spec.crossplane.compositionRef.name
+                if (isCrossplaneEnabled && resource.spec?.crossplane?.compositionRef?.name) {
+                  const composition = await this.fetchComposition(
+                    fetcher,
+                    cluster,
+                    credential,
+                    resource.spec.crossplane.compositionRef.name,
+                  );
+                  const usedFunctions = this.extractUsedFunctions(composition);
+
+                  return {
+                    ...resource,
+                    apiVersion: `${objectType.group}/${objectType.apiVersion}`,
+                    kind: objectType.singular || pluralize.singular(objectType.plural) || objectType.plural?.slice(0, -1),
+                    clusterName: cluster.name,
+                    compositionData: {
+                      name: resource.spec.crossplane.compositionRef.name,
+                      usedFunctions,
+                    },
+                  };
+                }
+                // Handle claims: spec.compositionRef.name
+                if (isCrossplaneEnabled && resource.spec?.compositionRef?.name) {
+                  const composition = await this.fetchComposition(
+                    fetcher,
+                    cluster,
+                    credential,
+                    resource.spec.compositionRef.name,
+                  );
+                  const usedFunctions = this.extractUsedFunctions(composition);
+
+                  return {
+                    ...resource,
+                    apiVersion: `${objectType.group}/${objectType.apiVersion}`,
+                    kind: objectType.singular || pluralize.singular(objectType.plural) || objectType.plural?.slice(0, -1),
+                    clusterName: cluster.name,
+                    compositionData: {
+                      name: resource.spec.compositionRef.name,
+                      usedFunctions,
+                    },
+                  };
+                }
 
                 return {
                   ...resource,
-                  clusterName,
-                  clusterEndpoint: clusterName,
-                  compositionData: {
-                    name: resource.spec.crossplane.compositionRef.name,
-                    usedFunctions,
-                  },
+                  apiVersion: `${objectType.group}/${objectType.apiVersion}`,
+                  kind: objectType.singular || pluralize.singular(objectType.plural) || objectType.plural?.slice(0, -1),
+                  clusterName: cluster.name,
                 };
-              }
-              // Handle claims: spec.compositionRef.name
-              if (isCrossplaneEnabled && resource.spec?.compositionRef?.name) {
-                const composition = await this.fetchComposition(
-                  clusterName,
-                  resource.spec.compositionRef.name,
-                );
-                const usedFunctions = this.extractUsedFunctions(composition);
+              })
+          ));
 
-                return {
-                  ...resource,
-                  clusterName,
-                  clusterEndpoint: clusterName,
-                  compositionData: {
-                    name: resource.spec.compositionRef.name,
-                    usedFunctions,
-                  },
-                };
-              }
-
-              return {
-                ...resource,
-                clusterName,
-                clusterEndpoint: clusterName,
-              };
-            });
-
-          allObjects.push(...(await Promise.all(filteredObjects)));
+          allObjects.push(...(await Promise.all(filteredObjects.flat())));
         } catch (error) {
           this.logger.error(
-            `Failed to fetch objects for cluster ${clusterName}: ${error}`,
+            `Failed to fetch objects for cluster ${cluster.name}: ${error}`,
           );
         }
       }
@@ -255,17 +411,32 @@ export class KubernetesDataProvider {
   }
 
   private async fetchComposition(
-    clusterName: string,
+    fetcher: any,
+    cluster: any,
+    credential: any,
     compositionName: string,
   ): Promise<any> {
-    const compositions = await this.resourceFetcher.fetchResources({
-      clusterName,
-      resourcePath: 'apiextensions.crossplane.io/v1/compositions',
+    const compositions = await fetcher.fetchObjectsForService({
+      serviceId: cluster.name,
+      clusterDetails: cluster,
+      credential,
+      objectTypesToFetch: new Set([
+        {
+          group: 'apiextensions.crossplane.io',
+          apiVersion: 'v1',
+          plural: 'compositions',
+          objectType: 'customresources' as KubernetesObjectTypes,
+        },
+      ]),
+      customResources: [],
     });
 
-    return (compositions as any[]).find(
-      composition => composition.metadata.name === compositionName,
-    );
+    return compositions.responses
+      .flatMap((response: { resources: any }) => response.resources)
+      .find(
+        (composition: { metadata: { name: string } }) =>
+          composition.metadata.name === compositionName,
+      );
   }
 
   private extractUsedFunctions(composition: any): string[] {
@@ -284,20 +455,30 @@ export class KubernetesDataProvider {
 
   async fetchCRDMapping(): Promise<Record<string, string>> {
     try {
-      // Get allowed clusters from config or discover them
-      const allowedClusters = this.config.getOptionalStringArray('kubernetesIngestor.allowedClusterNames');
-      let clusters: string[] = [];
-      
-      if (allowedClusters) {
-        clusters = allowedClusters;
-      } else {
-        try {
-          clusters = await this.resourceFetcher.getClusters();
-        } catch (error) {
-          this.logger.error('Failed to discover clusters:', error instanceof Error ? error : { error: String(error) });
-          return {};
+      const builder = KubernetesBuilder.createBuilder({
+        logger: this.logger,
+        config: this.config,
+        catalogApi: this.catalogApi,
+        permissions: this.permissions,
+        discovery: this.discovery,
+      });
+
+      const globalAuthStrategies = (global as any).kubernetesAuthStrategies;
+      if (globalAuthStrategies) {
+        for (const [key, strategy] of globalAuthStrategies) {
+          this.logger.debug(`Adding auth strategy: ${key}`);
+          builder.addAuthStrategy(key, strategy);
         }
       }
+
+      const { fetcher, clusterSupplier } = await builder.build();
+
+      const credentials: BackstageCredentials = {
+        $$type: '@backstage/BackstageCredentials',
+        principal: 'anonymous',
+      };
+
+      const clusters = await clusterSupplier.getClusters({ credentials });
 
       if (clusters.length === 0) {
         this.logger.warn('No clusters found for CRD mapping.');
@@ -306,29 +487,72 @@ export class KubernetesDataProvider {
 
       const crdMapping: Record<string, string> = {};
 
-      for (const clusterName of clusters) {
+      const allowedClusters = this.config.getOptionalStringArray("kubernetesIngestor.allowedClusterNames");
+      for (const cluster of clusters as ExtendedClusterDetails[]) {
+        if (allowedClusters && !allowedClusters.includes(cluster.name)) {
+          this.logger.debug(`Skipping cluster: ${cluster.name} as it is not included in the allowedClusterNames configuration.`);
+          continue;
+        }
+        // Get the auth provider type from the cluster config
+        const authProvider =
+          cluster.authMetadata[ANNOTATION_KUBERNETES_AUTH_PROVIDER] ||
+          'serviceAccount';
+
+        // Get the auth credentials based on the provider type
+        let credential;
         try {
-          const crds = await this.resourceFetcher.fetchResources({
-            clusterName,
-            resourcePath: 'apiextensions.k8s.io/v1/customresourcedefinitions',
+          credential = await getAuthCredential(cluster, authProvider,this.config,this.logger);
+        } catch (error) {
+          if (error instanceof Error) {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              error,
+            );
+          } else {
+            this.logger.error(
+              `Failed to get auth credentials for cluster ${cluster.name} with provider ${authProvider}:`,
+              {
+                error: String(error),
+              },
+            );
+          }
+          continue;
+        }
+
+        try {
+          const crds = await fetcher.fetchObjectsForService({
+            serviceId: cluster.name,
+            clusterDetails: cluster,
+            credential,
+            objectTypesToFetch: new Set([
+              {
+                group: 'apiextensions.k8s.io',
+                apiVersion: 'v1',
+                plural: 'customresourcedefinitions',
+                objectType: 'customresources' as KubernetesObjectTypes,
+              },
+            ]),
+            customResources: [],
           });
 
-          (crds as any[]).forEach(crd => {
-            const kind = crd.spec?.names?.kind;
-            const plural = crd.spec?.names?.plural;
-            if (kind && plural) {
-              crdMapping[kind] = plural;
-            }
-          });
+          crds.responses
+            .flatMap(response => response.resources)
+            .forEach(crd => {
+              const kind = crd.spec?.names?.kind;
+              const plural = crd.spec?.names?.plural;
+              if (kind && plural) {
+                crdMapping[kind] = plural;
+              }
+            });
         } catch (clusterError) {
           if (clusterError instanceof Error) {
             this.logger.error(
-              `Failed to fetch objects for cluster ${clusterName}: ${clusterError.message}`,
+              `Failed to fetch objects for cluster ${cluster.name}: ${clusterError.message}`,
               clusterError,
             );
           } else {
             this.logger.error(
-              `Failed to fetch objects for cluster ${clusterName}:`,
+              `Failed to fetch objects for cluster ${cluster.name}:`,
               {
                 error: String(clusterError),
               },
@@ -339,26 +563,59 @@ export class KubernetesDataProvider {
 
       return crdMapping;
     } catch (error) {
-      this.logger.error('Error fetching Kubernetes objects:', error as Error);
+      if (error instanceof Error) {
+        this.logger.error('Error fetching Kubernetes objects', error);
+      } else if (typeof error === 'object') {
+        this.logger.error(
+          'Error fetching Kubernetes objects',
+          error as JsonObject,
+        );
+      } else {
+        this.logger.error(
+          'Unknown error occurred while fetching Kubernetes objects',
+          {
+            message: String(error),
+          },
+        );
+      }
       return {};
     }
   }
 
   private async fetchCRDsForCluster(
-    clusterName: string,
+    fetcher: any,
+    cluster: any,
+    credential: any,
   ): Promise<{ group: string; version: string; plural: string }[]> {
-    const crds = await this.resourceFetcher.fetchResources({
-      clusterName,
-      resourcePath: 'apiextensions.k8s.io/v1/customresourcedefinitions',
+    const claimCRDs = await fetcher.fetchObjectsForService({
+      serviceId: cluster.name,
+      clusterDetails: cluster,
+      credential,
+      objectTypesToFetch: new Set([
+        {
+          group: 'apiextensions.k8s.io',
+          apiVersion: 'v1',
+          plural: 'customresourcedefinitions',
+          objectType: 'customresources' as KubernetesObjectTypes,
+        },
+      ]),
+      customResources: [],
     });
 
-    return (crds as any[])
+    return claimCRDs.responses
+      .flatMap((response: { resources: any }) => response.resources)
       .filter(
-        (resource: any) =>
+        (resource: { spec: { names: { categories: string | string[] } } }) =>
           resource?.spec?.names?.categories?.includes('claim'),
       )
       .map(
-        (crd: any) => ({
+        (crd: {
+          spec: {
+            group: any;
+            versions: { name: any }[];
+            names: { plural: any };
+          };
+        }) => ({
           group: crd.spec.group,
           version: crd.spec.versions[0]?.name || '',
           plural: crd.spec.names.plural,
@@ -367,7 +624,9 @@ export class KubernetesDataProvider {
   }
 
   private async fetchGenericCRDs(
-    clusterName: string,
+    fetcher: any,
+    cluster: any,
+    credential: any,
   ): Promise<{ group: string; version: string; plural: string }[]> {
     const labelSelector = this.config.getOptionalConfig(
       'kubernetesIngestor.genericCRDTemplates.crdLabelSelector',
@@ -377,25 +636,44 @@ export class KubernetesDataProvider {
         'kubernetesIngestor.genericCRDTemplates.crds',
       ) || [];
 
-    const crds = await this.resourceFetcher.fetchResources({
-      clusterName,
-      resourcePath: 'apiextensions.k8s.io/v1/customresourcedefinitions',
-      query: labelSelector ? {
-        labelSelector: `${labelSelector.getString('key')}=${labelSelector.getString('value')}`,
-      } : undefined,
+    const crds = await fetcher.fetchObjectsForService({
+      serviceId: cluster.name,
+      clusterDetails: cluster,
+      credential,
+      objectTypesToFetch: new Set([
+        {
+          group: 'apiextensions.k8s.io',
+          apiVersion: 'v1',
+          plural: 'customresourcedefinitions',
+          objectType: 'customresources' as KubernetesObjectTypes,
+        },
+      ]),
+      customResources: [],
     });
 
-    return (crds as any[])
+    return crds.responses
+      .flatMap((response: { resources: any }) => response.resources)
       .filter((crd: any) => {
+        if (labelSelector) {
+          const key = labelSelector.getString('key');
+          const value = labelSelector.getString('value');
+          return crd.metadata?.labels?.[key] === value;
+        }
         if (specificCRDs.length > 0) {
           return specificCRDs.includes(crd.metadata.name);
         }
-        return true;
+        return false;
       })
       .map(
-        (crd: any) => {
+        (crd: {
+          spec: {
+            group: any;
+            versions: { name: any; storage: boolean }[];
+            names: { plural: any };
+          };
+        }) => {
           const storageVersion =
-            crd.spec.versions.find((version: any) => version.storage) ||
+            crd.spec.versions.find(version => version.storage) ||
             crd.spec.versions[0];
           return {
             group: crd.spec.group,
