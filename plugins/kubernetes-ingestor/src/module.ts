@@ -3,10 +3,10 @@ import {
   createBackendModule,
 } from '@backstage/backend-plugin-api';
 import {
+  catalogServiceRef,
   catalogProcessingExtensionPoint,
 } from '@backstage/plugin-catalog-node/alpha';
-import { KubernetesEntityProvider, XRDTemplateEntityProvider } from './providers';
-import { DefaultKubernetesResourceFetcher } from './services';
+import { KubernetesEntityProvider, XRDTemplateEntityProvider } from './providers/EntityProvider';
 
 export const catalogModuleKubernetesIngestor = createBackendModule({
   pluginId: 'catalog',
@@ -18,17 +18,31 @@ export const catalogModuleKubernetesIngestor = createBackendModule({
         logger: coreServices.logger,
         config: coreServices.rootConfig,
         discovery: coreServices.discovery,
-        scheduler: coreServices.scheduler,
+        catalogApi: catalogServiceRef,
+        permissions: coreServices.permissions,
         auth: coreServices.auth,
+        httpAuth: coreServices.httpAuth,
+        scheduler: coreServices.scheduler,
       },
       async init({
         catalog,
         logger,
         config,
+        catalogApi,
+        permissions,
         discovery,
-        scheduler,
+        httpAuth,
         auth,
+        scheduler,
       }) {
+        // Check if this plugin should run based on selector
+        const ingestorSelector = config.getOptionalString('ingestorSelector') ?? 'kubernetes-ingestor';
+        if (ingestorSelector !== 'kubernetes-ingestor') {
+          logger.info(`TeraSky Kubernetes Ingestor (forked) skipped - using ${ingestorSelector}`);
+          return;
+        }
+        logger.info('TeraSky Kubernetes Ingestor (forked) selected and starting');
+
         const taskRunner = scheduler.createScheduledTaskRunner({
           frequency: {
             seconds: config.getOptionalNumber(
@@ -55,20 +69,26 @@ export const catalogModuleKubernetesIngestor = createBackendModule({
           },
         });
 
-        const resourceFetcher = new DefaultKubernetesResourceFetcher(discovery, auth);
-
         const templateEntityProvider = new KubernetesEntityProvider(
           taskRunner,
           logger,
           config,
-          resourceFetcher,
+          catalogApi,
+          permissions,
+          discovery,
+          auth,
+          httpAuth,
         );
 
         const xrdTemplateEntityProvider = new XRDTemplateEntityProvider(
           xrdTaskRunner,
           logger,
           config,
-          resourceFetcher,
+          catalogApi,
+          discovery,
+          permissions,
+          auth,
+          httpAuth,
         );
 
         const xrdEnabled = config.getOptionalBoolean('kubernetesIngestor.crossplane.xrds.enabled');
