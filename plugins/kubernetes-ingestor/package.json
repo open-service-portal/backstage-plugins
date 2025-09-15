@@ -1,5 +1,5 @@
 {
-  "name": "@terasky/backstage-plugin-kubernetes-ingestor",
+  "name": "@open-service-portal/backstage-plugin-kubernetes-ingestor",
   "version": "2.0.0",
   "main": "src/index.ts",
   "types": "src/index.ts",
@@ -11,15 +11,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TeraSky-OSS/backstage-plugins.git",
+    "url": "git+https://github.com/open-service-portal/backstage-plugins.git",
     "directory": "plugins/kubernetes-ingestor"
   },
-  "homepage": "https://terasky.com",
+  "homepage": "https://github.com/open-service-portal/backstage-plugins",
   "backstage": {
     "role": "backend-plugin",
     "pluginId": "backstage-plugin-kubernetes-ingestor",
     "pluginPackages": [
-      "@terasky/backstage-plugin-kubernetes-ingestor"
+      "@open-service-portal/backstage-plugin-kubernetes-ingestor"
     ]
   },
   "scripts": {
