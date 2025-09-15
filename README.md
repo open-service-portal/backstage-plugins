@@ -4,9 +4,9 @@ This is a fork of TeraSky's Backstage plugins maintained by the Open Service Por
 
 ## Branch Strategy
 
-- **`main`** - Stays synchronized with upstream TeraSky repository (pristine upstream)
-- **`openportal/main`** - Contains our customizations and enhancements (default branch for our work)
-- **Feature branches** - Created from `openportal/main` for new features
+- **`main`** - Our default branch with customizations (all changes via PR)
+- **`upstream`** - Pristine copy of TeraSky repository for syncing
+- **Feature branches** - Created from `main` for new features
 
 ## NPM Publishing
 
