@@ -37,11 +37,21 @@ export const catalogModuleKubernetesIngestor = createBackendModule({
       }) {
         // Check if this plugin should run based on selector
         const ingestorSelector = config.getOptionalString('ingestorSelector') ?? 'kubernetes-ingestor';
-        if (ingestorSelector !== 'kubernetes-ingestor-custom') {
-          logger.info(`TeraSky Kubernetes Ingestor (customized fork) skipped - using ${ingestorSelector}`);
+        
+        // Support multiple selectors for compatibility
+        const validSelectors = [
+          'kubernetes-ingestor',                    // Default/legacy selector
+          'open-service-portal-ingestor',          // Our custom selector
+          '@open-service-portal/backstage-plugin-kubernetes-ingestor',  // Full package name
+        ];
+        
+        const shouldActivate = !ingestorSelector || validSelectors.includes(ingestorSelector);
+        
+        if (!shouldActivate) {
+          logger.info(`OpenPortal Kubernetes Ingestor skipped - using ${ingestorSelector}`);
           return;
         }
-        logger.info('TeraSky Kubernetes Ingestor (customized fork) selected and starting');
+        logger.info('OpenPortal Kubernetes Ingestor (TeraSky-compatible fork) v1.0.0 starting');
 
         const taskRunner = scheduler.createScheduledTaskRunner({
           frequency: {
