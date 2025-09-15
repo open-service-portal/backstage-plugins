@@ -1,4 +1,22 @@
-# TeraSky's Backstage Plugins
+# TeraSky's Backstage Plugins - Open Service Portal Fork
+
+This is a fork of TeraSky's Backstage plugins maintained by the Open Service Portal organization.
+
+## Branch Strategy
+
+- **`main`** - Stays synchronized with upstream TeraSky repository (pristine upstream)
+- **`openportal/main`** - Contains our customizations and enhancements (default branch for our work)
+- **Feature branches** - Created from `openportal/main` for new features
+
+## NPM Publishing
+
+We publish our customized version of the kubernetes-ingestor plugin as:
+- **Package**: `@open-service-portal/backstage-plugin-kubernetes-ingestor`
+- **Registry**: https://registry.npmjs.org/
+- **Version**: 1.0.0+
+
+## Original Documentation
+
 These plugins are built and tested against Backstage version 1.41.1
 
 ## Plugin overviews
