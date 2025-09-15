@@ -3,15 +3,21 @@ import {
   EntityProviderConnection,
 } from '@backstage/plugin-catalog-node';
 import { Entity } from '@backstage/catalog-model';
-import { Config } from '@backstage/config';
-import { LoggerService, SchedulerServiceTaskRunner } from '@backstage/backend-plugin-api';
-import { DefaultKubernetesResourceFetcher } from '../services';
+import { SchedulerServiceTaskRunner } from '@backstage/backend-plugin-api';
 import { KubernetesDataProvider } from './KubernetesDataProvider';
-import { Logger } from 'winston';
-import { CRDDataProvider } from './CRDDataProvider';
-import { XRDDataProvider } from './XRDDataProvider';
+import { XrdDataProvider } from './XrdDataProvider';
+import { Config } from '@backstage/config';
+import { CatalogApi } from '@backstage/catalog-client';
+import { PermissionEvaluator } from '@backstage/plugin-permission-common';
+import {
+  LoggerService,
+  DiscoveryService,
+  HttpAuthService,
+  AuthService,
+} from '@backstage/backend-plugin-api';
 import yaml from 'js-yaml';
 import pluralize from 'pluralize';
+import { CRDDataProvider } from './CRDDataProvider';
 
 interface BackstageLink {
   url: string;
@@ -21,41 +27,15 @@ interface BackstageLink {
 }
 
 export class XRDTemplateEntityProvider implements EntityProvider {
+  private readonly taskRunner: SchedulerServiceTaskRunner;
   private connection?: EntityProviderConnection;
-
-  constructor(
-    private readonly taskRunner: SchedulerServiceTaskRunner,
-    logger: LoggerService,
-    private readonly config: Config,
-    private readonly resourceFetcher: DefaultKubernetesResourceFetcher,
-  ) {
-    this.logger = {
-      silent: true,
-      format: undefined,
-      levels: { error: 0, warn: 1, info: 2, debug: 3 },
-      level: 'warn',
-      error: logger.error.bind(logger),
-      warn: logger.warn.bind(logger),
-      info: logger.info.bind(logger),
-      debug: logger.debug.bind(logger),
-      transports: [],
-      exceptions: { handle() {} },
-      rejections: { handle() {} },
-      profilers: {},
-      exitOnError: false,
-      log: (level: string, msg: string) => {
-        switch (level) {
-          case 'error': logger.error(msg); break;
-          case 'warn': logger.warn(msg); break;
-          case 'info': logger.info(msg); break;
-          case 'debug': logger.debug(msg); break;
-          default: logger.info(msg);
-        }
-      },
-    } as unknown as Logger;
-  }
-
-  private readonly logger: Logger;
+  logger: LoggerService;
+  config: Config;
+  catalogApi: CatalogApi;
+  permissions: PermissionEvaluator;
+  discovery: DiscoveryService;
+  auth: AuthService;
+  httpAuth: HttpAuthService;
 
   private validateEntityName(entity: Entity): boolean {
     if (entity.metadata.name.length > 63) {
@@ -69,6 +49,26 @@ export class XRDTemplateEntityProvider implements EntityProvider {
 
   private getAnnotationPrefix(): string {
     return this.config.getOptionalString('kubernetesIngestor.annotationPrefix') || 'terasky.backstage.io';
+  }
+
+  constructor(
+    taskRunner: SchedulerServiceTaskRunner,
+    logger: LoggerService,
+    config: Config,
+    catalogApi: CatalogApi,
+    discovery: DiscoveryService,
+    permissions: PermissionEvaluator,
+    auth: AuthService,
+    httpAuth: HttpAuthService,
+  ) {
+    this.taskRunner = taskRunner;
+    this.logger = logger;
+    this.config = config;
+    this.catalogApi = catalogApi;
+    this.permissions = permissions;
+    this.discovery = discovery;
+    this.auth = auth;
+    this.httpAuth = httpAuth;
   }
 
   getProviderName(): string {
@@ -100,27 +100,38 @@ export class XRDTemplateEntityProvider implements EntityProvider {
         return;
       }
 
-      const templateDataProvider = new XRDDataProvider(
-        this.resourceFetcher,
-        this.config,
+      const templateDataProvider = new XrdDataProvider(
         this.logger,
+        this.config,
+        this.catalogApi,
+        this.discovery,
+        this.permissions,
+        this.auth,
+        this.httpAuth,
       );
 
       const crdDataProvider = new CRDDataProvider(
-        this.resourceFetcher,
-        this.config,
         this.logger,
+        this.config,
+        this.catalogApi,
+        this.discovery,
+        this.permissions,
       );
 
       let allEntities: Entity[] = [];
 
       // Fetch all CRDs once
       const crdData = await crdDataProvider.fetchCRDObjects();
+      // Log the number of CRDs fetched
+      this.logger.info(`Ingestor fetched ${crdData.length} CRD objects from clusters`);
 
       if (this.config.getOptionalBoolean('kubernetesIngestor.crossplane.xrds.enabled')) {
         const xrdData = await templateDataProvider.fetchXRDObjects();
-        const xrdEntities = xrdData.flatMap((xrd: any) => this.translateXRDVersionsToTemplates(xrd));
-        const APIEntities = xrdData.flatMap((xrd: any) => this.translateXRDVersionsToAPI(xrd));
+        this.logger.info(`Ingestor fetched ${xrdData.length} XRD objects from clusters`);
+        const xrdEntities = xrdData.flatMap(xrd => this.translateXRDVersionsToTemplates(xrd));
+        this.logger.info(`Ingestor found ${xrdEntities.length} XRD Entities`);
+        const APIEntities = xrdData.flatMap(xrd => this.translateXRDVersionsToAPI(xrd));
+        this.logger.info(`Ingestor found ${APIEntities.length} XRD API Entities`);
         allEntities = allEntities.concat(xrdEntities, APIEntities);
       }
 
@@ -128,6 +139,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       const crdEntities = crdData.flatMap(crd => this.translateCRDToTemplate(crd));
       const CRDAPIEntities = crdData.flatMap(crd => this.translateCRDVersionsToAPI(crd));
       allEntities = allEntities.concat(crdEntities, CRDAPIEntities);
+
+      this.logger.info(`Ingestor found ${allEntities.length} entities`);
 
       await this.connection.applyMutation({
         type: 'full',
@@ -142,14 +155,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
   }
 
   private translateXRDVersionsToTemplates(xrd: any): Entity[] {
-    if (!xrd?.metadata || !xrd?.spec) {
-      this.logger.warn(`Skipping XRD ${xrd?.metadata?.name || 'unknown'} due to missing metadata or spec`);
-      return [];
-    }
-    
-    if (!Array.isArray(xrd.spec.versions) || xrd.spec.versions.length === 0) {
-      this.logger.warn(`Skipping XRD ${xrd.metadata.name} due to missing or empty versions array`);
-      return [];
+    if (!xrd?.metadata || !xrd?.spec?.versions) {
+      throw new Error('Invalid XRD object');
     }
     // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
     // Use presence of xrd.spec.scope to determine v2, otherwise v1
@@ -169,7 +176,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
         const prefix = this.getAnnotationPrefix();
         const steps = this.extractSteps(version, xrd);
         const clusterTags = clusters.map((cluster: any) => `cluster:${cluster}`);
-        const tags = ['crossplane', ...clusterTags];
+        const tags = ['source:kubernetes-ingestor', 'crossplane', ...clusterTags];
         const crossplaneAnnotations = {
           [`${prefix}/crossplane-version`]: crossplaneVersion,
           [`${prefix}/crossplane-scope`]: scope,
@@ -184,12 +191,14 @@ export class XRDTemplateEntityProvider implements EntityProvider {
             labels: {
               forEntity: "system",
               source: "crossplane",
+              ...xrd.metadata.labels,
             },
             tags: tags,
             annotations: {
-              'backstage.io/managed-by-location': `cluster origin: ${xrd.clusterName}`,
-              'backstage.io/managed-by-origin-location': `cluster origin: ${xrd.clusterName}`,
+              'backstage.io/managed-by-location': `cluster: ${xrd.clusterName}`,
+              'backstage.io/managed-by-origin-location': `cluster: ${xrd.clusterName}`,
               ...crossplaneAnnotations,
+              ...xrd.metadata.annotations,
             },
           },
           spec: {
@@ -235,8 +244,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           },
           tags: tags,
           annotations: {
-            'backstage.io/managed-by-location': `cluster origin: ${xrd.clusterName}`,
-            'backstage.io/managed-by-origin-location': `cluster origin: ${xrd.clusterName}`,
+            'backstage.io/managed-by-location': `cluster: ${xrd.clusterName}`,
+            'backstage.io/managed-by-origin-location': `cluster: ${xrd.clusterName}`,
             [`${prefix}/crossplane-claim`]: 'true',
             ...crossplaneAnnotations,
           },
@@ -266,14 +275,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
   }
 
   private translateXRDVersionsToAPI(xrd: any): Entity[] {
-    if (!xrd?.metadata || !xrd?.spec) {
-      this.logger.warn(`Skipping XRD API generation for ${xrd?.metadata?.name || 'unknown'} due to missing metadata or spec`);
-      return [];
-    }
-    
-    if (!Array.isArray(xrd.spec.versions) || xrd.spec.versions.length === 0) {
-      this.logger.warn(`Skipping XRD API generation for ${xrd.metadata.name} due to missing or empty versions array`);
-      return [];
+    if (!xrd?.metadata || !xrd?.spec?.versions) {
+      throw new Error('Invalid XRD object');
     }
 
     // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
@@ -491,8 +494,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           name: `${resourceKind?.toLowerCase()}-${xrd.spec.group}--${version.name}`,
           title: `${resourceKind?.toLowerCase()}-${xrd.spec.group}--${version.name}`,
           annotations: {
-            'backstage.io/managed-by-location': `cluster origin: ${xrd.clusterName}`,
-            'backstage.io/managed-by-origin-location': `cluster origin: ${xrd.clusterName}`,
+            'backstage.io/managed-by-location': `cluster: ${xrd.clusterName}`,
+            'backstage.io/managed-by-origin-location': `cluster: ${xrd.clusterName}`,
           },
         },
         spec: {
@@ -537,10 +540,11 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       mainParameterGroup.required.push('xrNamespace');
       mainParameterGroup.properties.xrNamespace = {
         title: 'Namespace',
-        description: 'The namespace in which to create the resource',
+        description: 'The namespace in which to create the resource (default: demo)',
         pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
         maxLength: 63,
         type: 'string',
+        default: 'demo',  // Default namespace for convenience
       };
     }
     mainParameterGroup.properties.owner = {
@@ -1180,8 +1184,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           source: "kubernetes",
         },
         annotations: {
-          'backstage.io/managed-by-location': `cluster origin: ${crd.clusterName}`,
-          'backstage.io/managed-by-origin-location': `cluster origin: ${crd.clusterName}`,
+          'backstage.io/managed-by-location': `cluster: ${crd.clusterName}`,
+          'backstage.io/managed-by-origin-location': `cluster: ${crd.clusterName}`,
         },
       },
       spec: {
@@ -1894,39 +1898,15 @@ export class XRDTemplateEntityProvider implements EntityProvider {
 }
 
 export class KubernetesEntityProvider implements EntityProvider {
+  private readonly taskRunner: SchedulerServiceTaskRunner;
   private connection?: EntityProviderConnection;
-
-  constructor(
-    private readonly taskRunner: SchedulerServiceTaskRunner,
-    private readonly logger: LoggerService,
-    private readonly config: Config,
-    private readonly resourceFetcher: DefaultKubernetesResourceFetcher,
-  ) {
-    this.logger = {
-      silent: true,
-      format: undefined,
-      levels: { error: 0, warn: 1, info: 2, debug: 3 },
-      level: 'warn',
-      error: logger.error.bind(logger),
-      warn: logger.warn.bind(logger),
-      info: logger.info.bind(logger),
-      debug: logger.debug.bind(logger),
-      transports: [],
-      exceptions: { handle() {} },
-      rejections: { handle() {} },
-      profilers: {},
-      exitOnError: false,
-      log: (level: string, msg: string) => {
-        switch (level) {
-          case 'error': logger.error(msg); break;
-          case 'warn': logger.warn(msg); break;
-          case 'info': logger.info(msg); break;
-          case 'debug': logger.debug(msg); break;
-          default: logger.info(msg);
-        }
-      },
-    } as unknown as Logger;
-  }
+  private readonly logger: LoggerService;
+  private readonly config: Config;
+  private readonly catalogApi: CatalogApi;
+  private readonly permissions: PermissionEvaluator;
+  private readonly discovery: DiscoveryService;
+  private readonly auth: AuthService;
+  private readonly httpAuth: HttpAuthService;
 
   private validateEntityName(entity: Entity): boolean {
     if (entity.metadata.name.length > 63) {
@@ -1936,6 +1916,26 @@ export class KubernetesEntityProvider implements EntityProvider {
       return false;
     }
     return true;
+  }
+
+  constructor(
+    taskRunner: SchedulerServiceTaskRunner,
+    logger: LoggerService,
+    config: Config,
+    catalogApi: CatalogApi,
+    permissions: PermissionEvaluator,
+    discovery: DiscoveryService,
+    auth: AuthService,
+    httpAuth: HttpAuthService,
+  ) {
+    this.taskRunner = taskRunner;
+    this.logger = logger;
+    this.config = config;
+    this.catalogApi = catalogApi;
+    this.permissions = permissions;
+    this.discovery = discovery;
+    this.auth = auth;
+    this.httpAuth = httpAuth;
   }
 
   getProviderName(): string {
@@ -1962,9 +1962,13 @@ export class KubernetesEntityProvider implements EntityProvider {
       if (this.config.getOptionalBoolean('kubernetesIngestor.components.enabled')) {
         // Initialize providers
         const kubernetesDataProvider = new KubernetesDataProvider(
-          this.resourceFetcher,
-          this.config,
           this.logger,
+          this.config,
+          this.catalogApi,
+          this.permissions,
+          this.discovery,
+          this.auth,
+          this.httpAuth
         );
 
         let compositeKindLookup: { [key: string]: any } = {};
@@ -1972,10 +1976,14 @@ export class KubernetesEntityProvider implements EntityProvider {
         
         // Only initialize Crossplane providers if enabled
         if (isCrossplaneEnabled) {
-          xrdDataProvider = new XRDDataProvider(
-            this.resourceFetcher,
-            this.config,
+          xrdDataProvider = new XrdDataProvider(
             this.logger,
+            this.config,
+            this.catalogApi,
+            this.discovery,
+            this.permissions,
+            this.auth,
+            this.httpAuth,
           );
           // Build composite kind lookup for v2/Cluster/Namespaced (case-insensitive)
           compositeKindLookup = await xrdDataProvider.buildCompositeKindLookup();
@@ -1989,7 +1997,7 @@ export class KubernetesEntityProvider implements EntityProvider {
         const kubernetesData = await kubernetesDataProvider.fetchKubernetesObjects();
         const crdMapping = await kubernetesDataProvider.fetchCRDMapping();
         let claimCount = 0, compositeCount = 0, k8sCount = 0;
-        const entities = kubernetesData.flatMap((k8s: any) => {
+        const entities = kubernetesData.flatMap(k8s => {
           if (!isCrossplaneEnabled) {
             // When Crossplane is disabled, treat everything as regular K8s resources
             if (k8s) {
@@ -2031,7 +2039,7 @@ export class KubernetesEntityProvider implements EntityProvider {
 
         await this.connection.applyMutation({
           type: 'full',
-          entities: entities.map((entity: Entity) => ({
+          entities: entities.map(entity => ({
             entity,
             locationKey: `provider:${this.getProviderName()}`,
           })),
@@ -2050,7 +2058,7 @@ export class KubernetesEntityProvider implements EntityProvider {
     if (systemNamespaceModel === 'cluster') {
       systemNamespaceValue = resource.clusterName;
     } else if (systemNamespaceModel === 'namespace') {
-      systemNamespaceValue = namespace || 'default';
+      systemNamespaceValue = resource.metadata.namespace || 'default';
     } else {
       systemNamespaceValue = 'default';
     }
@@ -2059,7 +2067,7 @@ export class KubernetesEntityProvider implements EntityProvider {
     if (systemNameModel === 'cluster') {
       systemNameValue = resource.clusterName;
     } else if (systemNameModel === 'namespace') {
-      systemNameValue = namespace || resource.metadata.name;
+      systemNameValue = resource.metadata.namespace || resource.metadata.name;
     } else if (systemNameModel === 'cluster-namespace') {
       if (resource.metadata.namespace) {
         systemNameValue = `${resource.clusterName}-${resource.metadata.namespace}`;
@@ -2077,35 +2085,30 @@ export class KubernetesEntityProvider implements EntityProvider {
       systemReferencesNamespaceValue = 'default';
     }
     const prefix = this.getAnnotationPrefix();
+    const systemEntity: Entity = {
+      apiVersion: 'backstage.io/v1alpha1',
+      kind: 'System',
+      metadata: {
+        name: systemNameValue,
+        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
+        annotations: this.extractCustomAnnotations(annotations, resource.clusterName),
+      },
+      spec: {
+        owner: annotations[`${prefix}/owner`]?.includes(':') || annotations[`${prefix}/owner`]?.includes('/')
+          ? annotations[`${prefix}/owner`]  // Already a full entity reference
+          : annotations[`${prefix}/owner`]
+            ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}`  // Add namespace prefix
+            : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,  // Default fallback
+        type: annotations[`${prefix}/system-type`] || 'kubernetes-namespace',
+        ...(annotations[`${prefix}/domain`]
+          ? { domain: annotations[`${prefix}/domain`] }
+          : {}),
+      },
+    };
 
     const customAnnotations = this.extractCustomAnnotations(annotations, resource.clusterName);
 
-    // Add the Kubernetes label selector annotation if present
-    if (!annotations[`${prefix}/kubernetes-label-selector`]) {
-      if (resource.kind === 'Deployment' || resource.kind === 'StatefulSet' || resource.kind === 'DaemonSet' || resource.kind === 'CronJob') {
-        const commonLabels = this.findCommonLabels(resource);
-        if (commonLabels) {
-          customAnnotations['backstage.io/kubernetes-label-selector'] = commonLabels;
-        }
-      }
-    } else {
-      customAnnotations['backstage.io/kubernetes-label-selector'] = annotations[`${prefix}/kubernetes-label-selector`];
-    }
-
-    // Add custom workload URI
-    if (resource.apiVersion) {
-      const [apiGroup, version] = resource.apiVersion.includes('/') 
-        ? resource.apiVersion.split('/')
-        : ['', resource.apiVersion];
-      const kindPlural = pluralize(resource.kind);
-      const objectName = resource.metadata.name;
-      const customWorkloadUri = resource.metadata.namespace
-        ? `/apis/${apiGroup}/${version}/namespaces/${namespace}/${kindPlural}/${objectName}`
-        : `/apis/${apiGroup}/${version}/${kindPlural}/${objectName}`;
-      customAnnotations[`${prefix}/custom-workload-uri`] = customWorkloadUri.toLowerCase();
-    }
-
-    // Add source-location and techdocs-ref if present
+    // Add logic for source-location
     if (annotations[`${prefix}/source-code-repo-url`]) {
       const repoUrl = `url:${annotations[`${prefix}/source-code-repo-url`]}`;
       customAnnotations['backstage.io/source-location'] = repoUrl;
@@ -2119,52 +2122,123 @@ export class KubernetesEntityProvider implements EntityProvider {
       }
     }
 
-    const systemEntity: Entity = {
-      apiVersion: 'backstage.io/v1alpha1',
-      kind: 'System',
-      metadata: {
-        name: systemNameValue,
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        annotations: customAnnotations,
-      },
-      spec: {
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        type: annotations[`${prefix}/system-type`] || 'kubernetes-namespace',
-        ...(annotations[`${prefix}/domain`]
-          ? { domain: annotations[`${prefix}/domain`] }
-          : {}),
-      },
-    };
+    // Add the Kubernetes label selector annotation if present
+    if (!annotations[`${prefix}/kubernetes-label-selector`]) {
+      if (resource.kind === 'Deployment' || resource.kind === 'StatefulSet' || resource.kind === 'DaemonSet' || resource.kind === 'CronJob') {
+        const commonLabels = this.findCommonLabels(resource);
+        if (commonLabels) {
+          customAnnotations['backstage.io/kubernetes-label-selector'] = commonLabels;
+        }
+      }
+    } else {
+      customAnnotations['backstage.io/kubernetes-label-selector'] = annotations[`${prefix}/kubernetes-label-selector`];
+    }
+    const apiGroup = resource.apiVersion.split('/')[0];
+    const version = resource.apiVersion.split('/')[1];
+    const kindPlural = pluralize(resource.kind);
+    const objectName = resource.metadata.name;
+    const customWorkloadUri = resource.metadata.namespace
+      ? `/apis/${apiGroup}/${version}/namespaces/${namespace}/${kindPlural}/${objectName}`
+      : `/apis/${apiGroup}/${version}/${kindPlural}/${objectName}`;
+    customAnnotations[`${prefix}/custom-workload-uri`] = customWorkloadUri;
+    const namespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.namespaceModel')?.toLowerCase() || 'default';
+    const nameModel = this.config.getOptionalString('kubernetesIngestor.mappings.nameModel')?.toLowerCase() || 'name';
+    const titleModel = this.config.getOptionalString('kubernetesIngestor.mappings.titleModel')?.toLowerCase() || 'name';
+    const systemModel = this.config.getOptionalString('kubernetesIngestor.mappings.systemModel')?.toLowerCase() || 'namespace';
+    const referencesNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.referencesNamespaceModel')?.toLowerCase() || 'default';
+    let systemValue = '';
+    let namespaceValue = '';
+    let nameValue = '';
+    let titleValue = '';
+    let referencesNamespaceValue = '';
+    if (namespaceModel === 'cluster') {
+      namespaceValue = resource.clusterName;
+    } else if (namespaceModel === 'namespace') {
+      namespaceValue = resource.metadata.namespace || 'default';
+    } else {
+      namespaceValue = 'default';
+    }
+    if (referencesNamespaceModel === 'same') {
+      referencesNamespaceValue = resource.metadata.namespace;
+    } else if (referencesNamespaceModel === 'default') {
+      referencesNamespaceValue = 'default';
+    }
+    if (nameModel === 'name-cluster') {
+      nameValue = `${resource.metadata.name}-${resource.clusterName}`;
+    } else if (nameModel === 'name-namespace') {
+      if (resource.metadata.namespace) {
+        nameValue = `${resource.metadata.name}-${resource.metadata.namespace}`;
+      } else {
+        nameValue = `${resource.metadata.name}`;
+      }
+    } else if (nameModel === 'name-kind') {
+        const resourceKind = resource.kind || "res";
+        let processedKind = resourceKind.toLowerCase();
+        if (processedKind.length > 5) {
+          processedKind = processedKind.substring(0, 5);
+        }
+        nameValue = `${resource.metadata.name}-${processedKind}`;
+    } else {
+      nameValue = resource.metadata.name;
+    }
+    if (titleModel === 'name-cluster') {
+      titleValue = `${resource.metadata.name}-${resource.clusterName}`;
+    } else if (titleModel === 'name-namespace') {
+      if (resource.metadata.namespace) {
+        titleValue = `${resource.metadata.name}-${resource.metadata.namespace}`;
+      } else {
+        titleValue = `${resource.metadata.name}`;
+      }
+    } else {
+      titleValue = resource.metadata.name;
+    }
+    if (systemModel === 'cluster') {
+      systemValue = resource.clusterName;
+    } else if (systemModel === 'namespace') {
+      systemValue = resource.metadata.namespace || 'default';
+    } else if (systemModel === 'cluster-namespace') {
+      if (resource.metadata.namespace) {
+        systemValue = `${resource.clusterName}-${resource.metadata.namespace}`;
+      } else {
+        systemValue = `${resource.clusterName}`;
+      }
+    } else {
+      systemValue = 'default';
+    }
 
     const componentEntity: Entity = {
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'Component',
       metadata: {
-        name: annotations[`${prefix}/name`] || resource.metadata.name,
-        title: annotations[`${prefix}/title`] || resource.metadata.name,
+        name: nameValue,
+        title: titleValue,
         description: `${resource.kind} ${resource.metadata.name} from ${resource.clusterName}`,
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
+        namespace: annotations[`${prefix}/backstage-namespace`] || namespaceValue,
         links: this.parseBackstageLinks(resource.metadata.annotations || {}),
         annotations: {
-          ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
-          ),
+            ...Object.fromEntries(
+              Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+            ),
           'terasky.backstage.io/kubernetes-resource-kind': resource.kind,
           'terasky.backstage.io/kubernetes-resource-name': resource.metadata.name,
           'terasky.backstage.io/kubernetes-resource-api-version': resource.apiVersion,
           'terasky.backstage.io/kubernetes-resource-namespace': resource.metadata.namespace || '',
           ...customAnnotations,
-          ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
+          ...(systemModel === 'cluster-namespace' || namespaceModel === 'cluster' || nameModel === 'name-cluster' ? {
             'backstage.io/kubernetes-cluster': resource.clusterName,
           } : {})
         },
-        tags: [`cluster:${resource.clusterName}`, `kind:${resource.kind?.toLowerCase()}`],
+        tags: [`cluster:${resource.clusterName}`, `kind:${resource.kind}`],
       },
       spec: {
         type: annotations[`${prefix}/component-type`] || 'service',
         lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
+        owner: annotations[`${prefix}/owner`]?.includes(':') || annotations[`${prefix}/owner`]?.includes('/')
+          ? annotations[`${prefix}/owner`]  // Already a full entity reference
+          : annotations[`${prefix}/owner`]
+            ? `${referencesNamespaceModel}/${annotations[`${prefix}/owner`]}`  // Add namespace prefix
+            : `${referencesNamespaceValue}/kubernetes-auto-ingested`,  // Default fallback
+        system: annotations[`${prefix}/system`] || `${referencesNamespaceValue}/${systemValue}`,
         dependsOn: annotations[`${prefix}/dependsOn`]?.split(','),
         providesApis: annotations[`${prefix}/providesApis`]?.split(','),
         consumesApis: annotations[`${prefix}/consumesApis`]?.split(','),
@@ -2174,23 +2248,49 @@ export class KubernetesEntityProvider implements EntityProvider {
       },
     };
 
-    const entities: Entity[] = [];
-    if (this.validateEntityName(systemEntity)) {
-      entities.push(systemEntity);
-    }
-    if (this.validateEntityName(componentEntity)) {
-      entities.push(componentEntity);
-    }
-    return entities;
+    const entities = [systemEntity, componentEntity];
+    // Filter out invalid entities
+    return entities.filter(entity => this.validateEntityName(entity));
   }
 
-  private translateCrossplaneClaimToEntity(claim: any, clusterName: string, crdMapping: any): Entity | undefined {
-    // First, check if this is a valid claim by looking up its kind in the CRD mapping
-    const resourceKind = claim.kind;
-    if (!crdMapping[resourceKind]) {
-      this.logger.debug(`No CRD mapping found for kind ${resourceKind}, skipping claim processing`);
-      return undefined;
+  private findCommonLabels(resource: any): string | null {
+    const highLevelLabels = resource.metadata.labels || {};
+    const podLabels = resource.spec?.template?.metadata?.labels || {};
+
+    const commonLabels = Object.keys(highLevelLabels).filter(label => podLabels[label]);
+    if (commonLabels.length > 0) {
+      return commonLabels.map(label => `${label}=${highLevelLabels[label]}`).join(',');
+    } else if (Object.keys(highLevelLabels).length > 0) {
+      return Object.keys(highLevelLabels).map(label => `${label}=${highLevelLabels[label]}`).join(',');
     }
+
+    return null;
+  }
+
+  private extractCustomAnnotations(annotations: Record<string, string>, clusterName: string): Record<string, string> {
+    const prefix = this.getAnnotationPrefix();
+    const customAnnotationsKey = `${prefix}/component-annotations`;
+    const defaultAnnotations: Record<string, string> = {
+      'backstage.io/managed-by-location': `cluster: ${clusterName}`,
+      'backstage.io/managed-by-origin-location': `cluster: ${clusterName}`,
+    };
+
+    if (!annotations[customAnnotationsKey]) {
+      return defaultAnnotations;
+    }
+
+    const customAnnotations = annotations[customAnnotationsKey].split(',').reduce((acc, pair) => {
+      const [key, value] = pair.split('=').map(s => s.trim());
+      if (key && value) {
+        acc[key] = value;
+      }
+      return acc;
+    }, defaultAnnotations);
+
+    return customAnnotations;
+  }
+
+  private translateCrossplaneClaimToEntity(claim: any, clusterName: string, crdMapping: Record<string, string>): Entity | null {
     const prefix = this.getAnnotationPrefix();
     const annotations = claim.metadata.annotations || {};
 
@@ -2209,117 +2309,144 @@ export class KubernetesEntityProvider implements EntityProvider {
     const compositionData = claim.compositionData || {};
     const compositionName = compositionData.name || '';
     const compositionFunctions = compositionData.usedFunctions || [];
-
     // Add Crossplane claim annotations
-    const crossplaneAnnotations = {
-      [`${prefix}/claim-name`]: claim.metadata.name,
-      [`${prefix}/claim-kind`]: crKind,
-      [`${prefix}/claim-version`]: crVersion,
-      [`${prefix}/claim-group`]: crGroup,
-      [`${prefix}/claim-plural`]: crPlural,
-      [`${prefix}/crossplane-resource`]: "true",
-      [`${prefix}/composite-kind`]: compositeKind,
-      [`${prefix}/composite-name`]: compositeName,
-      [`${prefix}/composite-group`]: compositeGroup,
-      [`${prefix}/composite-version`]: compositeVersion,
-      [`${prefix}/composite-plural`]: compositePlural,
-      [`${prefix}/composition-name`]: compositionName,
-      [`${prefix}/composition-functions`]: compositionFunctions.join(','),
-      'backstage.io/kubernetes-label-selector': `crossplane.io/claim-name=${claim.metadata.name},crossplane.io/claim-namespace=${claim.metadata.namespace},crossplane.io/composite=${compositeName}`
-    };
+    annotations[`${prefix}/claim-name`] = claim.metadata.name;
+    annotations[`${prefix}/claim-kind`] = crKind;
+    annotations[`${prefix}/claim-version`] = crVersion;
+    annotations[`${prefix}/claim-group`] = crGroup;
+    annotations[`${prefix}/claim-plural`] = crPlural;
+    annotations[`${prefix}/crossplane-resource`] = "true";
 
+    annotations[`${prefix}/composite-kind`] = compositeKind;
+    annotations[`${prefix}/composite-name`] = compositeName;
+    annotations[`${prefix}/composite-group`] = compositeGroup;
+    annotations[`${prefix}/composite-version`] = compositeVersion;
+    annotations[`${prefix}/composite-plural`] = compositePlural;
+    annotations[`${prefix}/composition-name`] = compositionName;
+    annotations[`${prefix}/composition-functions`] = compositionFunctions.join(',');
+    annotations['backstage.io/kubernetes-label-selector'] = `crossplane.io/claim-name=${claim.metadata.name},crossplane.io/claim-namespace=${claim.metadata.namespace},crossplane.io/composite=${compositeName}`
     const resourceAnnotations = claim.metadata.annotations || {};
     const customAnnotations = this.extractCustomAnnotations(resourceAnnotations, clusterName);
-
-    const systemNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.namespaceModel')?.toLowerCase() || 'default';
-    let systemNamespaceValue = '';
-    if (systemNamespaceModel === 'cluster') {
-      systemNamespaceValue = clusterName;
-    } else if (systemNamespaceModel === 'namespace') {
-      systemNamespaceValue = claim.metadata.namespace || 'default';
+    const namespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.namespaceModel')?.toLowerCase() || 'default';
+    const nameModel = this.config.getOptionalString('kubernetesIngestor.mappings.nameModel')?.toLowerCase() || 'name';
+    const titleModel = this.config.getOptionalString('kubernetesIngestor.mappings.titleModel')?.toLowerCase() || 'name';
+    const systemModel = this.config.getOptionalString('kubernetesIngestor.mappings.systemModel')?.toLowerCase() || 'namespace';
+    const referencesNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.referencesNamespaceModel')?.toLowerCase() || 'default';
+    let systemValue = '';
+    let namespaceValue = '';
+    let nameValue = '';
+    let titleValue = '';
+    let referencesNamespaceValue = '';
+    if (namespaceModel === 'cluster') {
+      namespaceValue = clusterName;
+    } else if (namespaceModel === 'namespace') {
+      namespaceValue = claim.metadata.namespace || 'default';
     } else {
-      systemNamespaceValue = 'default';
+      namespaceValue = 'default';
     }
-    const systemNameModel = this.config.getOptionalString('kubernetesIngestor.mappings.systemModel')?.toLowerCase() || 'namespace';
-    let systemNameValue = '';
-    if (systemNameModel === 'cluster') {
-      systemNameValue = clusterName;
-    } else if (systemNameModel === 'namespace') {
-      systemNameValue = claim.metadata.namespace || claim.metadata.name;
-    } else if (systemNameModel === 'cluster-namespace') {
+    if (referencesNamespaceModel === 'same') {
+      referencesNamespaceValue = claim.metadata.namespace || 'default';
+    } else if (referencesNamespaceModel === 'default') {
+      referencesNamespaceValue = 'default';
+    }
+    if (nameModel === 'name-cluster') {
+      nameValue = `${claim.metadata.name}-${clusterName}`;
+    } else if (nameModel === 'name-namespace') {
       if (claim.metadata.namespace) {
-        systemNameValue = `${clusterName}-${claim.metadata.namespace}`;
+        nameValue = `${claim.metadata.name}-${claim.metadata.namespace}`;
       } else {
-        systemNameValue = `${clusterName}`;
+        nameValue = `${claim.metadata.name}`;
+      }
+    } else if (nameModel === 'name-kind') {
+      const resourceKind = claim.kind || "res";
+      let processedKind = resourceKind.toLowerCase();
+      if (processedKind.length > 5) {
+        processedKind = processedKind.substring(0, 5);
+      }
+      nameValue = `${claim.metadata.name}-${processedKind}`;
+    } else {
+      nameValue = claim.metadata.name;
+    }
+    if (titleModel === 'name-cluster') {
+      titleValue = `${claim.metadata.name}-${clusterName}`;
+    } else if (titleModel === 'name-namespace') {
+      if (claim.metadata.namespace) {
+        titleValue = `${claim.metadata.name}-${claim.metadata.namespace}`;
+      } else {
+        titleValue = `${claim.metadata.name}`;
       }
     } else {
-      systemNameValue = 'default';
+      titleValue = claim.metadata.name;
     }
-    const systemReferencesNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.referencesNamespaceModel')?.toLowerCase() || 'default';
-    let systemReferencesNamespaceValue = '';
-    if (systemReferencesNamespaceModel === 'same') {
-      systemReferencesNamespaceValue = claim.metadata.name;
-    } else if (systemReferencesNamespaceModel === 'default') {
-      systemReferencesNamespaceValue = 'default';
+    if (systemModel === 'cluster') {
+      systemValue = clusterName;
+    } else if (systemModel === 'namespace') {
+      systemValue = claim.metadata.namespace || 'default';
+    } else if (systemModel === 'cluster-namespace') {
+      if (claim.metadata.namespace) {
+        systemValue = `${clusterName}-${claim.metadata.namespace}`;
+      } else {
+        systemValue = `${clusterName}`;
+      }
+    } else {
+      systemValue = 'default';
     }
 
-    const entity: Entity = {
+    const entity = {
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'Component',
       metadata: {
-        name: annotations[`${prefix}/name`] || claim.metadata.name,
-        title: annotations[`${prefix}/title`] || claim.metadata.name,
-        tags: [`cluster:${claim.clusterName}`, `kind:${crKind.toLowerCase()}`],
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        links: this.parseBackstageLinks(claim.metadata.annotations || {}),
+        name: nameValue,
+        title: titleValue,
+        description: `${claim.kind} ${claim.metadata.name} from ${clusterName}`,
+        tags: [`cluster:${clusterName}`, `kind:${claim.kind}`, 'crossplane-claim'],
+        namespace: namespaceValue,
+        links: this.parseBackstageLinks(annotations),
         annotations: {
-          ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
-          ),
+            ...Object.fromEntries(
+              Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+            ),
           [`${prefix}/component-type`]: 'crossplane-claim',
-          ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
+          ...(systemModel === 'cluster-namespace' || namespaceModel === 'cluster' || nameModel === 'name-cluster' ? {
             'backstage.io/kubernetes-cluster': clusterName,
           } : {}),
           ...customAnnotations,
-          ...crossplaneAnnotations,
         },
       },
       spec: {
         type: 'crossplane-claim',
         lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
-        consumesApis: [`${systemReferencesNamespaceValue}/${claim.kind}-${claim.apiVersion.split('/').join('--')}`],
+        owner: annotations[`${prefix}/owner`]?.includes(':') || annotations[`${prefix}/owner`]?.includes('/')
+          ? annotations[`${prefix}/owner`]  // Already a full entity reference
+          : annotations[`${prefix}/owner`]
+            ? `${referencesNamespaceModel}/${annotations[`${prefix}/owner`]}`  // Add namespace prefix
+            : `${referencesNamespaceValue}/kubernetes-auto-ingested`,  // Default fallback
+        system: annotations[`${prefix}/system`] || `${referencesNamespaceValue}/${systemValue}`,
+        consumesApis: [`${referencesNamespaceValue}/${claim.kind}-${claim.apiVersion.split('/').join('--')}`],
         ...(annotations[`${prefix}/subcomponent-of`] && {
           subcomponentOf: annotations[`${prefix}/subcomponent-of`],
         }),
       },
     };
 
-    return this.validateEntityName(entity) ? entity : undefined;
+    // Return null if entity name is invalid
+    return this.validateEntityName(entity) ? entity : null;
   }
 
-  private translateCrossplaneCompositeToEntity(xr: any, clusterName: string, compositeKindLookup: any): Entity | undefined {
-    // First, check if this is a valid composite by looking up its kind in the composite kind lookup
-    const [group, version] = xr.apiVersion.split('/');
-    const lookupKey = `${xr.kind}|${group}|${version}`;
-    const lookupKeyLower = lookupKey.toLowerCase();
-    if (!compositeKindLookup[lookupKey] && !compositeKindLookup[lookupKeyLower]) {
-      this.logger.debug(`No composite kind lookup found for key ${lookupKey}, skipping composite processing`);
-      return undefined;
-    }
-    const annotations = xr.metadata.annotations || {};
+  private translateCrossplaneCompositeToEntity(xr: any, clusterName: string, compositeKindLookup: { [key: string]: any }): Entity | null {
     const prefix = this.getAnnotationPrefix();
     const kind = xr.kind;
-    const scope = compositeKindLookup[lookupKey]?.scope || compositeKindLookup[lookupKeyLower]?.scope;
+    const [group, version] = xr.apiVersion.split('/');
+    const lookupKey = `${kind}|${group}|${version}`;
+    const lowerKey = lookupKey.toLowerCase();
+    const xrd = compositeKindLookup[lookupKey] || compositeKindLookup[lowerKey];
+    if (!xrd) return null;
+    const scope = xrd.scope;
     const crossplaneVersion = 'v2';
-    const plural = compositeKindLookup[lookupKey]?.spec?.names?.plural || compositeKindLookup[lookupKeyLower]?.spec?.names?.plural;
+    const plural = xrd.spec?.names?.plural;
     const compositionName = xr.spec?.crossplane?.compositionRef?.name || '';
-    const compositionData = xr.compositionData || {};
-    const compositionFunctions = compositionData.usedFunctions || [];
-
-    // Add Crossplane annotations
-    const crossplaneAnnotations = {
+    // Compose annotations
+    const annotations: Record<string, string> = {
       [`${prefix}/crossplane-version`]: crossplaneVersion,
       [`${prefix}/crossplane-scope`]: scope,
       [`${prefix}/composite-kind`]: kind,
@@ -2330,111 +2457,124 @@ export class KubernetesEntityProvider implements EntityProvider {
       [`${prefix}/composition-name`]: compositionName,
       [`${prefix}/crossplane-resource`]: 'true',
       [`${prefix}/component-type`]: 'crossplane-xr',
-      'backstage.io/kubernetes-label-selector': `crossplane.io/composite=${xr.metadata.name}`,
     };
-
-    // Add composition-functions annotation if present
+    // Add composition-functions annotation if present, just like for claims
+    const compositionData = xr.compositionData || {};
+    const compositionFunctions = compositionData.usedFunctions || [];
     if (compositionFunctions.length > 0) {
-      crossplaneAnnotations[`${prefix}/composition-functions`] = compositionFunctions.join(',');
+      annotations[`${prefix}/composition-functions`] = compositionFunctions.join(',');
     }
-
     const resourceAnnotations = xr.metadata.annotations || {};
     const customAnnotations = this.extractCustomAnnotations(resourceAnnotations, clusterName);
+    // Add label selector for XR
+    annotations['backstage.io/kubernetes-label-selector'] = `crossplane.io/composite=${xr.metadata.name}`;
 
-    const systemNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.namespaceModel')?.toLowerCase() || 'default';
-    let systemNamespaceValue = '';
-    if (systemNamespaceModel === 'cluster') {
-      systemNamespaceValue = clusterName;
-    } else if (systemNamespaceModel === 'namespace') {
-      systemNamespaceValue = xr.metadata.namespace || 'default';
+    // --- Begin: Config-based naming/namespace logic (copied from claim) ---
+    const namespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.namespaceModel')?.toLowerCase() || 'default';
+    const nameModel = this.config.getOptionalString('kubernetesIngestor.mappings.nameModel')?.toLowerCase() || 'name';
+    const titleModel = this.config.getOptionalString('kubernetesIngestor.mappings.titleModel')?.toLowerCase() || 'name';
+    const systemModel = this.config.getOptionalString('kubernetesIngestor.mappings.systemModel')?.toLowerCase() || 'namespace';
+    const referencesNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.referencesNamespaceModel')?.toLowerCase() || 'default';
+
+    let systemValue = '';
+    let namespaceValue = '';
+    let nameValue = '';
+    let titleValue = '';
+    let referencesNamespaceValue = '';
+
+    if (namespaceModel === 'cluster') {
+      namespaceValue = clusterName;
+    } else if (namespaceModel === 'namespace') {
+      namespaceValue = xr.metadata.namespace || 'default';
     } else {
-      systemNamespaceValue = 'default';
+      namespaceValue = 'default';
     }
-    const systemNameModel = this.config.getOptionalString('kubernetesIngestor.mappings.systemModel')?.toLowerCase() || 'namespace';
-    let systemNameValue = '';
-    if (systemNameModel === 'cluster') {
-      systemNameValue = clusterName;
-    } else if (systemNameModel === 'namespace') {
-      systemNameValue = xr.metadata.namespace || xr.metadata.name;
-    } else if (systemNameModel === 'cluster-namespace') {
+    if (referencesNamespaceModel === 'same') {
+      referencesNamespaceValue = xr.metadata.namespace || 'default';
+    } else if (referencesNamespaceModel === 'default') {
+      referencesNamespaceValue = 'default';
+    }
+    if (nameModel === 'name-cluster') {
+      nameValue = `${xr.metadata.name}-${clusterName}`;
+    } else if (nameModel === 'name-namespace') {
       if (xr.metadata.namespace) {
-        systemNameValue = `${clusterName}-${xr.metadata.namespace}`;
+        nameValue = `${xr.metadata.name}-${xr.metadata.namespace}`;
       } else {
-        systemNameValue = `${clusterName}`;
+        nameValue = `${xr.metadata.name}`;
+      }
+    } else if (nameModel === 'name-kind') {
+      const resourceKind = xr.kind || "res";
+      let processedKind = resourceKind.toLowerCase();
+      if (processedKind.length > 5) {
+        processedKind = processedKind.substring(0, 5);
+      }
+      nameValue = `${xr.metadata.name}-${processedKind}`;
+    } else {
+      nameValue = xr.metadata.name;
+    }
+    if (titleModel === 'name-cluster') {
+      titleValue = `${xr.metadata.name}-${clusterName}`;
+    } else if (titleModel === 'name-namespace') {
+      if (xr.metadata.namespace) {
+        titleValue = `${xr.metadata.name}-${xr.metadata.namespace}`;
+      } else {
+        titleValue = `${xr.metadata.name}`;
       }
     } else {
-      systemNameValue = 'default';
+      titleValue = xr.metadata.name;
     }
-    const systemReferencesNamespaceModel = this.config.getOptionalString('kubernetesIngestor.mappings.referencesNamespaceModel')?.toLowerCase() || 'default';
-    let systemReferencesNamespaceValue = '';
-    if (systemReferencesNamespaceModel === 'same') {
-      systemReferencesNamespaceValue = xr.metadata.name;
-    } else if (systemReferencesNamespaceModel === 'default') {
-      systemReferencesNamespaceValue = 'default';
+    if (systemModel === 'cluster') {
+      systemValue = clusterName;
+    } else if (systemModel === 'namespace') {
+      systemValue = xr.metadata.namespace || 'default';
+    } else if (systemModel === 'cluster-namespace') {
+      if (xr.metadata.namespace) {
+        systemValue = `${clusterName}-${xr.metadata.namespace}`;
+      } else {
+        systemValue = `${clusterName}`;
+      }
+    } else {
+      systemValue = 'default';
     }
+    // --- End: Config-based naming/namespace logic ---
 
     const entity: Entity = {
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'Component',
       metadata: {
-        name: annotations[`${prefix}/name`] || xr.metadata.name,
-        title: annotations[`${prefix}/title`] || xr.metadata.name,
-        tags: [`cluster:${xr.clusterName}`, `kind:${kind.toLowerCase()}`],
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
+        name: nameValue,
+        title: titleValue,
+        description: `${kind} ${xr.metadata.name} from ${clusterName}`,
+        tags: [`cluster:${clusterName}`, `kind:${kind}`, 'crossplane-xr'],
+        namespace: namespaceValue,
         links: this.parseBackstageLinks(xr.metadata.annotations || {}),
         annotations: {
           ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+            Object.entries({ ...xr.metadata.annotations, ...annotations }).filter(([key]) => key !== `${prefix}/links`)
           ),
           'backstage.io/kubernetes-cluster': clusterName,
           ...customAnnotations,
-          ...crossplaneAnnotations,
         },
       },
       spec: {
         type: 'crossplane-xr',
         lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] || 'kubernetes-auto-ingested',
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
-        consumesApis: [`${systemReferencesNamespaceValue}/${xr.kind}-${xr.apiVersion.split('/').join('--')}`],
+        owner: annotations[`${prefix}/owner`]?.includes(':') || annotations[`${prefix}/owner`]?.includes('/')
+          ? annotations[`${prefix}/owner`]  // Already a full entity reference
+          : annotations[`${prefix}/owner`] || 'kubernetes-auto-ingested',  // Default or add prefix
+        system: annotations[`${prefix}/system`] || `${referencesNamespaceValue}/${systemValue}`,
+        consumesApis: [`${referencesNamespaceValue}/${xr.kind}-${xr.apiVersion.split('/').join('--')}`],
         ...(annotations[`${prefix}/subcomponent-of`] && {
           subcomponentOf: annotations[`${prefix}/subcomponent-of`],
         }),
       },
     };
-
-    return this.validateEntityName(entity) ? entity : undefined;
-  }
-
-  private extractCustomAnnotations(annotations: Record<string, string>, clusterName: string): Record<string, string> {
-    const prefix = this.getAnnotationPrefix();
-    const customAnnotations: Record<string, string> = {};
-    for (const [key, value] of Object.entries(annotations)) {
-      if (!key.startsWith(prefix)) {
-        customAnnotations[key] = value;
-      }
-    }
-    customAnnotations['backstage.io/managed-by-location'] = `cluster origin: ${clusterName}`;
-    customAnnotations['backstage.io/managed-by-origin-location'] = `cluster origin: ${clusterName}`;
-    return customAnnotations;
+    // Log the full composite entity YAML for debugging
+    return this.validateEntityName(entity) ? entity : null;
   }
 
   private getAnnotationPrefix(): string {
     return this.config.getOptionalString('kubernetesIngestor.annotationPrefix') || 'terasky.backstage.io';
-  }
-
-  private findCommonLabels(resource: any): string | null {
-    const highLevelLabels = resource.metadata.labels || {};
-    const podLabels = resource.spec?.template?.metadata?.labels || {};
-
-    const commonLabels = Object.keys(highLevelLabels).filter(label => podLabels[label]);
-    if (commonLabels.length > 0) {
-      return commonLabels.map(label => `${label}=${highLevelLabels[label]}`).join(',');
-    } else if (Object.keys(highLevelLabels).length > 0) {
-      return Object.keys(highLevelLabels).map(label => `${label}=${highLevelLabels[label]}`).join(',');
-    }
-
-    return null;
   }
 
   private parseBackstageLinks(annotations: Record<string, string>): BackstageLink[] {
