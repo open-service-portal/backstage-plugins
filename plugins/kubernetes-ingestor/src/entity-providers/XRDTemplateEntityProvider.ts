@@ -9,10 +9,15 @@ import { DefaultKubernetesResourceFetcher } from '../services';
 import { Logger } from 'winston';
 import { CRDDataProvider } from '../providers/CRDDataProvider';
 import { XRDDataProvider } from '../providers/XRDDataProvider';
-import yaml from 'js-yaml';
+import { CrossplaneVersionHandler } from '../version-handlers/CrossplaneVersionHandler';
+import { CRDScopeHandler } from '../version-handlers/CRDScopeHandler';
+import { StepsYamlBuilder } from '../yaml-builders/StepsYamlBuilder';
+import { OpenAPIDocBuilder } from '../yaml-builders/OpenAPIDocBuilder';
 
 export class XRDTemplateEntityProvider implements EntityProvider {
   private connection?: EntityProviderConnection;
+  private readonly stepsYamlBuilder: StepsYamlBuilder;
+  private readonly openAPIDocBuilder: OpenAPIDocBuilder;
 
   constructor(
     private readonly taskRunner: SchedulerServiceTaskRunner,
@@ -20,6 +25,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
     private readonly config: Config,
     private readonly resourceFetcher: DefaultKubernetesResourceFetcher,
   ) {
+    this.stepsYamlBuilder = new StepsYamlBuilder(this.config);
+    this.openAPIDocBuilder = new OpenAPIDocBuilder();
     this.logger = {
       silent: true,
       format: undefined,
@@ -142,35 +149,24 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       this.logger.warn(`Skipping XRD ${xrd.metadata.name} due to missing or empty versions array`);
       return [];
     }
-    // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
-    // Use presence of xrd.spec.scope to determine v2, otherwise v1
-    const isV2 = !!xrd.spec?.scope;
-    const crossplaneVersion = isV2 ? 'v2' : 'v1';
-    const scope = xrd.spec?.scope || (isV2 ? 'LegacyCluster' : 'Cluster');
-    const isLegacyCluster = isV2 && scope === 'LegacyCluster';
-    const isCluster = scope === 'Cluster';
-    const isNamespaced = scope === 'Namespaced';
-    // --- END VERSION/SCOPE LOGIC REFACTOR ---
+    const isDirectXR = CrossplaneVersionHandler.isDirectXR(xrd);
     const clusters = xrd.clusters || ["kubetopus"];
     const templates = xrd.spec.versions.map((version: { name: any }) => {
       // For v2 Cluster/Namespaced, do not generate claim-based templates
-      if (isV2 && !isLegacyCluster && (isCluster || isNamespaced)) {
+      if (isDirectXR) {
         // No claimNames, use spec.name as resource type
         const parameters = this.extractParameters(version, clusters, xrd);
         const prefix = this.getAnnotationPrefix();
         const steps = this.extractSteps(version, xrd);
         const clusterTags = clusters.map((cluster: any) => `cluster:${cluster}`);
         const tags = ['crossplane', ...clusterTags];
-        const crossplaneAnnotations = {
-          [`${prefix}/crossplane-version`]: crossplaneVersion,
-          [`${prefix}/crossplane-scope`]: scope,
-        };
+        const crossplaneAnnotations = CrossplaneVersionHandler.getCrossplaneAnnotations(xrd, prefix);
         return {
           apiVersion: 'scaffolder.backstage.io/v1beta3',
           kind: 'Template',
           metadata: {
             name: `${xrd.metadata.name}-${version.name}`,
-            title: `${xrd.spec.claimNames?.kind || xrd.spec.names?.kind}`,
+            title: `${CrossplaneVersionHandler.getResourceKind(xrd)}`,
             description: `A template to create a ${xrd.metadata.name} instance`,
             labels: {
               forEntity: "system",
@@ -209,16 +205,13 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       const steps = this.extractSteps(version, xrd);
       const clusterTags = clusters.map((cluster: any) => `cluster:${cluster}`);
       const tags = ['crossplane', ...clusterTags];
-      const crossplaneAnnotations = {
-        [`${prefix}/crossplane-version`]: crossplaneVersion,
-        [`${prefix}/crossplane-scope`]: scope,
-      };
+      const crossplaneAnnotations = CrossplaneVersionHandler.getCrossplaneAnnotations(xrd, prefix);
       return {
         apiVersion: 'scaffolder.backstage.io/v1beta3',
         kind: 'Template',
         metadata: {
           name: `${xrd.metadata.name}-${version.name}`,
-          title: `${xrd.spec.claimNames?.kind || xrd.spec.names?.kind}`,
+          title: `${CrossplaneVersionHandler.getResourceKind(xrd)}`,
           description: `A template to create a ${xrd.metadata.name} instance`,
           labels: {
             forEntity: "system",
@@ -267,214 +260,10 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       return [];
     }
 
-    // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
-    // Use presence of xrd.spec.scope to determine v2, otherwise v1
-    const isV2 = !!xrd.spec?.scope;
-    const scope = xrd.spec?.scope || (isV2 ? 'LegacyCluster' : 'Cluster');
-    const isLegacyCluster = isV2 && scope === 'LegacyCluster';
-    // --- END VERSION/SCOPE LOGIC REFACTOR ---
     // Prefer spec.names.plural/kind if available, fallback to metadata.name
-    const resourcePlural = (!isV2 || isLegacyCluster)
-      ? xrd.spec.claimNames?.plural
-      : (xrd.spec.names?.plural || xrd.metadata.name);
-    const resourceKind = (!isV2 || isLegacyCluster)
-      ? xrd.spec.claimNames?.kind
-      : (xrd.spec.names?.kind || xrd.metadata.name);
+    const resourceKind = CrossplaneVersionHandler.getResourceKind(xrd);
 
     const apis = xrd.spec.versions.map((version: any = {}) => {
-      // Use the generated CRD's schema if present, otherwise fallback to XRD schema
-      let crdSchemaProps = undefined;
-      if (xrd.generatedCRD) {
-        const crdVersion = xrd.generatedCRD.spec.versions.find((v: any) => v.name === version.name) ||
-                           xrd.generatedCRD.spec.versions.find((v: any) => v.storage) ||
-                           xrd.generatedCRD.spec.versions[0];
-        crdSchemaProps = crdVersion?.schema?.openAPIV3Schema?.properties;
-      }
-      const schemaProps = crdSchemaProps || version.schema.openAPIV3Schema.properties;
-
-      let xrdOpenAPIDoc: any = {};
-      xrdOpenAPIDoc.openapi = "3.0.0";
-      xrdOpenAPIDoc.info = {
-        title: `${resourcePlural}.${xrd.spec.group}`,
-        version: version.name,
-      };
-      xrdOpenAPIDoc.servers = xrd.clusterDetails.map((cluster: any) => ({
-        url: cluster.url,
-        description: cluster.name,
-      }));
-      xrdOpenAPIDoc.tags = [
-        {
-          name: "Cluster Scoped Operations",
-          description: "Operations on the cluster level"
-        },
-        {
-          name: "Namespace Scoped Operations",
-          description: "Operations on the namespace level"
-        },
-        {
-          name: "Specific Object Scoped Operations",
-          description: "Operations on a specific resource"
-        }
-      ];
-      // TODO(vrabbi) Add Paths To API for XRD
-      xrdOpenAPIDoc.paths = {
-        [`/apis/${xrd.spec.group}/${version.name}/${resourcePlural}`]: {
-          get: {
-            tags: ["Cluster Scoped Operations"],
-            summary: `List all ${resourcePlural} in all namespaces`,
-            operationId: `list${resourcePlural}AllNamespaces`,
-            responses: {
-              "200": {
-                description: `List of ${resourcePlural} in all namespaces`,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "array",
-                      items: {
-                        $ref: `#/components/schemas/Resource`
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        [`/apis/${xrd.spec.group}/${version.name}/namespaces/{namespace}/${resourcePlural}`]: {
-          get: {
-            tags: ["Namespace Scoped Operations"],
-            summary: `List all ${resourcePlural} in a namespace`,
-            operationId: `list${resourcePlural}`,
-            parameters: [
-              {
-                name: "namespace",
-                in: "path",
-                required: true,
-                schema: {
-                  type: "string"
-                }
-              }
-            ],
-            responses: {
-              "200": {
-                description: `List of ${resourcePlural}`,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "array",
-                      items: {
-                        $ref: `#/components/schemas/Resource`
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          post: {
-            tags: ["Namespace Scoped Operations"],
-            summary: "Create a resource",
-            operationId: "createResource",
-            parameters: [
-              { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-            ],
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    $ref: `#/components/schemas/Resource`
-                  }
-                },
-              },
-            },
-            responses: {
-              "201": { description: "Resource created" },
-            },
-          },
-        },
-        [`/apis/${xrd.spec.group}/${version.name}/namespaces/{namespace}/${resourcePlural}/{name}`]: {
-          get: {
-            tags: ["Specific Object Scoped Operations"],
-            summary: `Get a ${resourceKind}`,
-            operationId: `get${resourceKind}`,
-            parameters: [
-              { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-              { name: "name", in: "path", required: true, schema: { type: "string" } },
-            ],
-            responses: {
-              "200": {
-                description: "Resource details",
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "object",
-                      $ref: `#/components/schemas/Resource`
-                    },
-                  },
-                },
-              },
-            },
-          },
-          put: {
-            tags: ["Specific Object Scoped Operations"],
-            summary: "Update a resource",
-            operationId: "updateResource",
-            parameters: [
-              { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-              { name: "name", in: "path", required: true, schema: { type: "string" } },
-            ],
-            requestBody: {
-              required: true,
-              content: {
-                "application/json": {
-                  schema: {
-                    type: "object",
-                    $ref: `#/components/schemas/Resource`
-                  },
-                },
-              },
-            },
-            responses: {
-              "200": { description: "Resource updated" },
-            },
-          },
-          delete: {
-            tags: ["Specific Object Scoped Operations"],
-            summary: "Delete a resource",
-            operationId: "deleteResource",
-            parameters: [
-              { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-              { name: "name", in: "path", required: true, schema: { type: "string" } },
-            ],
-            responses: {
-              "200": { description: "Resource deleted" },
-            },
-          },
-        },
-      };
-      xrdOpenAPIDoc.components = {
-        schemas: {
-          Resource: {
-            type: "object",
-            properties: schemaProps
-          }
-        },
-        securitySchemes: {
-          bearerHttpAuthentication: {
-            description: "Bearer token using a JWT",
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "JWT"
-          }
-        }
-      };
-      xrdOpenAPIDoc.security = [
-        {
-          bearerHttpAuthentication: []
-        }
-      ];
       return {
         apiVersion: 'backstage.io/v1alpha1',
         kind: 'API',
@@ -491,7 +280,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           lifecycle: "production",
           owner: "kubernetes-auto-ingested",
           system: "kubernets-auto-ingested",
-          definition: yaml.dump(xrdOpenAPIDoc),
+          definition: this.openAPIDocBuilder.buildXRDOpenAPIDoc(version, xrd),
         },
       };
     });
@@ -501,14 +290,8 @@ export class XRDTemplateEntityProvider implements EntityProvider {
   }
 
   private extractParameters(version: any, clusters: string[], xrd: any): any[] {
-    // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
-    // Use presence of xrd.spec.scope to determine v2, otherwise v1
-    const isV2 = !!xrd.spec?.scope;
-    const scope = xrd.spec?.scope || (isV2 ? 'LegacyCluster' : 'Cluster');
-    const isLegacyCluster = isV2 && scope === 'LegacyCluster';
-    const isCluster = scope === 'Cluster';
-    const isNamespaced = scope === 'Namespaced';
-    // --- END VERSION/SCOPE LOGIC REFACTOR ---
+    const shouldIncludeNamespace = CrossplaneVersionHandler.shouldIncludeNamespace(xrd);
+    const isDirectXR = CrossplaneVersionHandler.isDirectXR(xrd);
     // Main parameter group
     let mainParameterGroup: any = {
       title: 'Resource Metadata',
@@ -524,7 +307,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
       },
       type: 'object',
     };
-    if ((isV2 && isNamespaced) || (!isV2) || isLegacyCluster) {
+    if (shouldIncludeNamespace) {
       mainParameterGroup.required.push('xrNamespace');
       mainParameterGroup.properties.xrNamespace = {
         title: 'Namespace',
@@ -602,7 +385,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
     };
     // Crossplane settings
     let crossplaneParameters: any = null;
-    if ((isV2 && (isCluster || isNamespaced)) && !isLegacyCluster) {
+    if (isDirectXR) {
       // v2 Cluster/Namespaced: move crossplane settings under spec.crossplane, remove writeConnectionSecretToRef
       crossplaneParameters = {
         title: 'Crossplane Settings',
@@ -969,159 +752,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
   }
 
   private extractSteps(version: any, xrd: any): any[] {
-    // --- BEGIN VERSION/SCOPE LOGIC REFACTOR ---
-    // Use presence of xrd.spec.scope to determine v2, otherwise v1
-    const isV2 = !!xrd.spec?.scope;
-    const scope = xrd.spec?.scope || (isV2 ? 'LegacyCluster' : 'LegacyCluster');
-    const isLegacyCluster = isV2 && scope === 'LegacyCluster';
-    const isCluster = scope === 'Cluster';
-    const isNamespaced = scope === 'Namespaced';
-    // --- END VERSION/SCOPE LOGIC REFACTOR ---
-    let baseStepsYaml = '';
-    // Compose the YAML as a string, not a template literal with JS expressions inside
-    if (isV2 && (isCluster || isNamespaced) && !isLegacyCluster) {
-      // v2 Cluster/Namespaced: no claim, use resource template action, only set namespaceParam if Namespaced
-      baseStepsYaml =
-        '- id: generateManifest\n' +
-        '  name: Generate Kubernetes Resource Manifest\n' +
-        '  action: terasky:claim-template\n' +
-        '  input:\n' +
-        '    parameters: ${{ parameters }}\n' +
-        '    nameParam: xrName\n' +
-        (isNamespaced ? '    namespaceParam: xrNamespace\n' : '    namespaceParam: ""\n') +
-        '    ownerParam: owner\n' +
-        '    excludeParams: [\'crossplane.compositionSelectionStrategy\',\'owner\',\'pushToGit\',\'basePath\',\'manifestLayout\',\'_editData\',\'targetBranch\',\'repoUrl\',\'clusters\',\'xrName\'' + (isNamespaced ? ', \'xrNamespace\'' : '') + ']\n' +
-        '    apiVersion: {API_VERSION}\n' +
-        '    kind: {KIND}\n' +
-        '    clusters: ${{ parameters.clusters if parameters.manifestLayout === \'cluster-scoped\' and parameters.pushToGit else [\'temp\'] }}\n' +
-        '    removeEmptyParams: true\n';
-      if (isNamespaced) {
-        baseStepsYaml +=
-          '- id: moveNamespacedManifest\n' +
-          '  name: Move and Rename Manifest\n' +
-          '  if: ${{ parameters.manifestLayout === \'namespace-scoped\' }}\n' +
-          '  action: fs:rename\n' +
-          '  input:\n' +
-          '    files:\n' +
-          '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-          '        to: "./${{ parameters.xrNamespace }}/${{ steps.generateManifest.input.kind }}/${{ steps.generateManifest.output.filePaths[0].split(\'/\').pop() }}"\n';
-      }
-      baseStepsYaml +=
-        '- id: moveCustomManifest\n' +
-        '  name: Move and Rename Manifest\n' +
-        '  if: ${{ parameters.manifestLayout === \'custom\' }}\n' +
-        '  action: fs:rename\n' +
-        '  input:\n' +
-        '    files:\n' +
-        '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-        '        to: "./${{ parameters.basePath }}/${{ parameters.xrName }}.yaml"'; // <-- removed trailing newline
-    } else {
-      // v1 or v2 LegacyCluster: keep current logic
-      baseStepsYaml =
-        '- id: generateManifest\n' +
-        '  name: Generate Kubernetes Resource Manifest\n' +
-        '  action: terasky:claim-template\n' +
-        '  input:\n' +
-        '    parameters: ${{ parameters }}\n' +
-        '    nameParam: xrName\n' +
-        '    namespaceParam: xrNamespace\n' +
-        '    ownerParam: owner\n' +
-        '    excludeParams: [\'owner\', \'compositionSelectionStrategy\',\'pushToGit\',\'basePath\',\'manifestLayout\',\'_editData\', \'targetBranch\', \'repoUrl\', \'clusters\', \'xrName\', \'xrNamespace\']\n' +
-        '    apiVersion: {API_VERSION}\n' +
-        '    kind: {KIND}\n' +
-        '    clusters: ${{ parameters.clusters if parameters.manifestLayout === \'cluster-scoped\' and parameters.pushToGit else [\'temp\'] }}\n' +
-        '    removeEmptyParams: true\n' +
-        '- id: moveNamespacedManifest\n' +
-        '  name: Move and Rename Manifest\n' +
-        '  if: ${{ parameters.manifestLayout === \'namespace-scoped\' }}\n' +
-        '  action: fs:rename\n' +
-        '  input:\n' +
-        '    files:\n' +
-        '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-        '        to: "./${{ parameters.xrNamespace }}/${{ steps.generateManifest.input.kind }}/${{ steps.generateManifest.output.filePaths[0].split(\'/\').pop() }}"\n' +
-        '- id: moveCustomManifest\n' +
-        '  name: Move and Rename Manifest\n' +
-        '  if: ${{ parameters.manifestLayout === \'custom\' }}\n' +
-        '  action: fs:rename\n' +
-        '  input:\n' +
-        '    files:\n' +
-        '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-        '        to: "./${{ parameters.basePath }}/${{ parameters.xrName }}.yaml"'; // <-- removed trailing newline
-    }
-    const publishPhaseTarget = this.config.getOptionalString('kubernetesIngestor.crossplane.xrds.publishPhase.target')?.toLowerCase();
-    let action = '';
-    switch (publishPhaseTarget) {
-      case 'gitlab':
-        action = 'publish:gitlab:merge-request';
-        break;
-      case 'bitbucket':
-        action = 'publish:bitbucketServer:pull-request';
-        break;
-      case 'bitbucketcloud':
-        action = 'publish:bitbucketCloud:pull-request';
-        break;
-      case 'github':
-      default:
-        action = 'publish:github:pull-request';
-        break;
-    }
-    const repoSelectionStepsYaml = `
-- id: create-pull-request
-  name: create-pull-request
-  action: ${action}
-  if: \${{ parameters.pushToGit }}
-  input:
-    repoUrl: \${{ parameters.repoUrl }}
-    branchName: create-\${{ parameters.xrName }}-resource
-    title: Create {KIND} Resource \${{ parameters.xrName }}
-    description: Create {KIND} Resource \${{ parameters.xrName }}
-    targetBranchName: \${{ parameters.targetBranch }}
-  `;
-
-    let defaultStepsYaml = baseStepsYaml;
-
-    if (publishPhaseTarget !== 'yaml') {
-      if (this.config.getOptionalBoolean('kubernetesIngestor.crossplane.xrds.publishPhase.allowRepoSelection')) {
-        defaultStepsYaml += repoSelectionStepsYaml;
-      }
-      else {
-        const repoHardcodedStepsYaml = `
-- id: create-pull-request
-  name: create-pull-request
-  action: ${action}
-  if: \${{ parameters.pushToGit }}
-  input:
-    repoUrl: ${this.config.getOptionalString('kubernetesIngestor.crossplane.xrds.publishPhase.git.repoUrl')}
-    branchName: create-\${{ parameters.xrName }}-resource
-    title: Create {KIND} Resource \${{ parameters.xrName }}
-    description: Create {KIND} Resource \${{ parameters.xrName }}
-    targetBranchName: ${this.config.getOptionalString('kubernetesIngestor.crossplane.xrds.publishPhase.git.targetBranch')}
-      `;
-        defaultStepsYaml += repoHardcodedStepsYaml;
-      }
-    }
-
-    // Replace placeholders in the default steps YAML with XRD details
-    const apiVersion = `${xrd.spec.group}/${version.name}`;
-    const kind = (!isV2 || isLegacyCluster)
-      ? xrd.spec.claimNames?.kind
-      : xrd.spec.names?.kind;
-
-    const populatedStepsYaml = defaultStepsYaml
-      .replaceAll('{API_VERSION}', apiVersion)
-      .replaceAll('{KIND}', kind);
-
-    // Parse the populated default steps YAML string
-    const defaultSteps = yaml.load(populatedStepsYaml) as any[];
-
-    // Retrieve additional steps from the version if defined
-    const additionalStepsYamlString = version.schema?.openAPIV3Schema?.properties?.steps?.default;
-    const additionalSteps = additionalStepsYamlString
-      ? yaml.load(additionalStepsYamlString) as any[]
-      : [];
-
-    // Combine default steps with any additional steps
-    return [...defaultSteps, ...additionalSteps];
+    return this.stepsYamlBuilder.buildXRDSteps(version, xrd);
   }
 
   private getPullRequestUrl(): string {
@@ -1205,293 +836,6 @@ export class XRDTemplateEntityProvider implements EntityProvider {
     }
 
     const apis = crd.spec.versions.map((version: any = {}) => {
-      let crdOpenAPIDoc: any = {};
-      crdOpenAPIDoc.openapi = "3.0.0";
-      crdOpenAPIDoc.info = {
-        title: `${crd.spec.names.plural}.${crd.spec.group}`,
-        version: version.name,
-      };
-      crdOpenAPIDoc.servers = crd.clusterDetails.map((cluster: any) => ({
-        url: cluster.url,
-        description: cluster.name,
-      }));
-      crdOpenAPIDoc.tags = [
-        {
-          name: "Cluster Scoped Operations",
-          description: "Operations on the cluster level"
-        },
-        {
-          name: "Namespace Scoped Operations",
-          description: "Operations on the namespace level"
-        },
-        {
-          name: "Specific Object Scoped Operations",
-          description: "Operations on a specific resource"
-        }
-      ]
-      // TODO(vrabbi) Add Paths To API for XRD
-      if (crd.spec.scope === "Cluster") {
-        crdOpenAPIDoc.paths = {
-          [`/apis/${crd.spec.group}/${version.name}/${crd.spec.names.plural}`]: {
-            get: {
-              tags: ["Cluster Scoped Operations"],
-              summary: `List all ${crd.spec.names.plural} in all namespaces`,
-              operationId: `list${crd.spec.names.plural}AllNamespaces`,
-              responses: {
-                "200": {
-                  description: `List of ${crd.spec.names.plural} in all namespaces`,
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "array",
-                        items: {
-                          $ref: `#/components/schemas/Resource`
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            post: {
-              tags: ["Cluster Scoped Operations"],
-              summary: "Create a resource",
-              operationId: "createResource",
-              parameters: [],
-              requestBody: {
-                required: true,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "object",
-                      $ref: `#/components/schemas/Resource`
-                    }
-                  },
-                },
-              },
-              responses: {
-                "201": { description: "Resource created" },
-              },
-            },
-          },
-          [`/apis/${crd.spec.group}/${version.name}/${crd.spec.names.plural}/{name}`]: {
-            get: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: `Get a ${crd.spec.names.kind}`,
-              operationId: `get${crd.spec.names.kind}`,
-              parameters: [
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              responses: {
-                "200": {
-                  description: "Resource details",
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "object",
-                        $ref: `#/components/schemas/Resource`
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            put: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: "Update a resource",
-              operationId: "updateResource",
-              parameters: [
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              requestBody: {
-                required: true,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "object",
-                      $ref: `#/components/schemas/Resource`
-                    },
-                  },
-                },
-              },
-              responses: {
-                "200": { description: "Resource updated" },
-              },
-            },
-            delete: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: "Delete a resource",
-              operationId: "deleteResource",
-              parameters: [
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              responses: {
-                "200": { description: "Resource deleted" },
-              },
-            },
-          },
-        };
-      }
-      else {
-        crdOpenAPIDoc.paths = {
-          [`/apis/${crd.spec.group}/${version.name}/${crd.spec.names.plural}`]: {
-            get: {
-              tags: ["Cluster Scoped Operations"],
-              summary: `List all ${crd.spec.names.plural} in all namespaces`,
-              operationId: `list${crd.spec.names.plural}AllNamespaces`,
-              responses: {
-                "200": {
-                  description: `List of ${crd.spec.names.plural} in all namespaces`,
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "array",
-                        items: {
-                          $ref: `#/components/schemas/Resource`
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          [`/apis/${crd.spec.group}/${version.name}/namespaces/{namespace}/${crd.spec.names.plural}`]: {
-            get: {
-              tags: ["Namespace Scoped Operations"],
-              summary: `List all ${crd.spec.names.plural} in a namespace`,
-              operationId: `list${crd.spec.names.plural}`,
-              parameters: [
-                {
-                  name: "namespace",
-                  in: "path",
-                  required: true,
-                  schema: {
-                    type: "string"
-                  }
-                }
-              ],
-              responses: {
-                "200": {
-                  description: `List of ${crd.spec.names.plural}`,
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "array",
-                        items: {
-                          $ref: `#/components/schemas/Resource`
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            post: {
-              tags: ["Namespace Scoped Operations"],
-              summary: "Create a resource",
-              operationId: "createResource",
-              parameters: [
-                { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-              ],
-              requestBody: {
-                required: true,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "object",
-                      $ref: `#/components/schemas/Resource`
-                    }
-                  },
-                },
-              },
-              responses: {
-                "201": { description: "Resource created" },
-              },
-            },
-          },
-          [`/apis/${crd.spec.group}/${version.name}/namespaces/{namespace}/${crd.spec.names.plural}/{name}`]: {
-            get: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: `Get a ${crd.spec.names.kind}`,
-              operationId: `get${crd.spec.names.kind}`,
-              parameters: [
-                { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              responses: {
-                "200": {
-                  description: "Resource details",
-                  content: {
-                    "application/json": {
-                      schema: {
-                        type: "object",
-                        $ref: `#/components/schemas/Resource`
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            put: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: "Update a resource",
-              operationId: "updateResource",
-              parameters: [
-                { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              requestBody: {
-                required: true,
-                content: {
-                  "application/json": {
-                    schema: {
-                      type: "object",
-                      $ref: `#/components/schemas/Resource`
-                    },
-                  },
-                },
-              },
-              responses: {
-                "200": { description: "Resource updated" },
-              },
-            },
-            delete: {
-              tags: ["Specific Object Scoped Operations"],
-              summary: "Delete a resource",
-              operationId: "deleteResource",
-              parameters: [
-                { name: "namespace", in: "path", required: true, schema: { type: "string" } },
-                { name: "name", in: "path", required: true, schema: { type: "string" } },
-              ],
-              responses: {
-                "200": { description: "Resource deleted" },
-              },
-            },
-          },
-        };
-      }
-      crdOpenAPIDoc.components = {
-        schemas: {
-          Resource: {
-            type: "object",
-            properties: version.schema.openAPIV3Schema.properties
-          }
-        },
-        securitySchemes: {
-          bearerHttpAuthentication: {
-            description: "Bearer token using a JWT",
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: "JWT"
-          }
-        }
-      };
-      crdOpenAPIDoc.security = [
-        {
-          bearerHttpAuthentication: []
-        }
-      ]
       return {
         apiVersion: 'backstage.io/v1alpha1',
         kind: 'API',
@@ -1508,7 +852,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           lifecycle: "production",
           owner: "kubernetes-auto-ingested",
           system: "kubernets-auto-ingested",
-          definition: yaml.dump(crdOpenAPIDoc),
+          definition: this.openAPIDocBuilder.buildCRDOpenAPIDoc(version, crd),
         },
       };
     }
@@ -1530,15 +874,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
           maxLength: 63,
           type: 'string',
         },
-        ...(crd.spec.scope === 'Namespaced' ? {
-          namespace: {
-            title: 'Namespace',
-            description: 'The namespace in which to create the resource',
-            pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
-            maxLength: 63,
-            type: 'string',
-          }
-        } : {}),
+        ...CRDScopeHandler.getNamespaceMetadata(crd),
         owner: {
           title: 'Owner',
           description: 'The owner of the resource',
@@ -1784,88 +1120,7 @@ export class XRDTemplateEntityProvider implements EntityProvider {
   }
 
   private extractCRDSteps(version: any, crd: any): any[] {
-    let baseStepsYaml =
-      '- id: generateManifest\n' +
-      '  name: Generate Kubernetes Resource Manifest\n' +
-      '  action: terasky:crd-template\n' +
-      '  input:\n' +
-      '    parameters: ${{ parameters }}\n' +
-      '    nameParam: name\n' +
-      (crd.spec.scope === 'Namespaced' ? '    namespaceParam: namespace\n' : '    namespaceParam: ""\n') +
-      '    excludeParams: [\'compositionSelectionStrategy\',\'pushToGit\',\'basePath\',\'manifestLayout\',\'_editData\', \'targetBranch\', \'repoUrl\', \'clusters\', \'name\', \'namespace\', \'owner\']\n' +
-      `    apiVersion: ${crd.spec.group}/${version.name}\n` +
-      `    kind: ${crd.spec.names.kind}\n` +
-      '    clusters: ${{ parameters.clusters if parameters.manifestLayout === \'cluster-scoped\' and parameters.pushToGit else [\'temp\'] }}\n' +
-      '    removeEmptyParams: true\n';
-    if (crd.spec.scope === 'Namespaced') {
-      baseStepsYaml +=
-        '- id: moveNamespacedManifest\n' +
-        '  name: Move and Rename Manifest\n' +
-        '  if: ${{ parameters.manifestLayout === \'namespace-scoped\' }}\n' +
-        '  action: fs:rename\n' +
-        '  input:\n' +
-        '    files:\n' +
-        '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-        '        to: "./${{ parameters.namespace }}/${{ steps.generateManifest.input.kind }}/${{ steps.generateManifest.output.filePaths[0].split(\'/\').pop() }}"\n';
-    }
-    baseStepsYaml +=
-      '- id: moveCustomManifest\n' +
-      '  name: Move and Rename Manifest\n' +
-      '  if: ${{ parameters.manifestLayout === \'custom\' }}\n' +
-      '  action: fs:rename\n' +
-      '  input:\n' +
-      '    files:\n' +
-      '      - from: ${{ steps.generateManifest.output.filePaths[0] }}\n' +
-      '        to: "./${{ parameters.basePath }}/${{ parameters.name }}.yaml"\n'; // <-- removed trailing newline
-
-    const publishPhaseTarget = this.config.getOptionalString('kubernetesIngestor.genericCRDTemplates.publishPhase.target')?.toLowerCase();
-    let action = '';
-    switch (publishPhaseTarget) {
-      case 'gitlab':
-        action = 'publish:gitlab:merge-request';
-        break;
-      case 'bitbucket':
-        action = 'publish:bitbucketServer:pull-request';
-        break;
-      case 'bitbucketcloud':
-        action = 'publish:bitbucketCloud:pull-request';
-        break;
-      case 'github':
-      default:
-        action = 'publish:github:pull-request';
-        break;
-    }
-
-    let defaultStepsYaml = baseStepsYaml;
-
-    if (publishPhaseTarget !== 'yaml') {
-      if (this.config.getOptionalBoolean('kubernetesIngestor.genericCRDTemplates.publishPhase.allowRepoSelection')) {
-        defaultStepsYaml +=
-          '- id: create-pull-request\n' +
-          '  name: create-pull-request\n' +
-          `  action: ${action}\n` +
-          '  if: ${{ parameters.pushToGit }}\n' +
-          '  input:\n' +
-          '    repoUrl: ${{ parameters.repoUrl }}\n' +
-          '    branchName: create-${{ parameters.name }}-resource\n' +
-          `    title: Create ${crd.spec.names.kind} Resource \${{ parameters.name }}\n` +
-          `    description: Create ${crd.spec.names.kind} Resource \${{ parameters.name }}\n` +
-          '    targetBranchName: ${{ parameters.targetBranch }}\n';
-      } else {
-        defaultStepsYaml +=
-          '- id: create-pull-request\n' +
-          '  name: create-pull-request\n' +
-          `  action: ${action}\n` +
-          '  if: ${{ parameters.pushToGit }}\n' +
-          '  input:\n' +
-          `    repoUrl: ${this.config.getOptionalString('kubernetesIngestor.genericCRDTemplates.publishPhase.git.repoUrl')}\n` +
-          '    branchName: create-${{ parameters.name }}-resource\n' +
-          `    title: Create ${crd.spec.names.kind} Resource \${{ parameters.name }}\n` +
-          `    description: Create ${crd.spec.names.kind} Resource \${{ parameters.name }}\n` +
-          `    targetBranchName: ${this.config.getOptionalString('kubernetesIngestor.genericCRDTemplates.publishPhase.git.targetBranch')}\n`;
-      }
-    }
-    return yaml.load(defaultStepsYaml) as any[];
+    return this.stepsYamlBuilder.buildCRDSteps(version, crd);
   }
 
   private getCRDPullRequestUrl(): string {
