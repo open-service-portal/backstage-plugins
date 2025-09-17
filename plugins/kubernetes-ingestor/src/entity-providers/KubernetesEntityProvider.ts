@@ -11,6 +11,8 @@ import { Logger } from 'winston';
 import { XRDDataProvider } from '../providers/XRDDataProvider';
 import pluralize from 'pluralize';
 import { BackstageLink } from '../interfaces';
+import { ComponentEntityBuilder } from '../entity-builders/ComponentEntityBuilder';
+import { SystemEntityBuilder } from '../entity-builders/SystemEntityBuilder';
 
 export class KubernetesEntityProvider implements EntityProvider {
   private connection?: EntityProviderConnection;
@@ -238,60 +240,43 @@ export class KubernetesEntityProvider implements EntityProvider {
       }
     }
 
-    const systemEntity: Entity = {
-      apiVersion: 'backstage.io/v1alpha1',
-      kind: 'System',
-      metadata: {
-        name: systemNameValue,
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        annotations: customAnnotations,
-      },
-      spec: {
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        type: annotations[`${prefix}/system-type`] || 'kubernetes-namespace',
-        ...(annotations[`${prefix}/domain`]
-          ? { domain: annotations[`${prefix}/domain`] }
-          : {}),
-      },
-    };
+    // Create system entity using SystemEntityBuilder
+    const systemEntity = new SystemEntityBuilder()
+      .withKubernetesSystemMetadata(
+        resource,
+        systemNameValue,
+        systemNamespaceValue,
+        systemReferencesNamespaceValue,
+        prefix,
+        customAnnotations
+      )
+      .build();
 
-    const componentEntity: Entity = {
-      apiVersion: 'backstage.io/v1alpha1',
-      kind: 'Component',
-      metadata: {
-        name: annotations[`${prefix}/name`] || resource.metadata.name,
-        title: annotations[`${prefix}/title`] || resource.metadata.name,
-        description: `${resource.kind} ${resource.metadata.name} from ${resource.clusterName}`,
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        links: this.parseBackstageLinks(resource.metadata.annotations || {}),
-        annotations: {
-          ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
-          ),
-          'terasky.backstage.io/kubernetes-resource-kind': resource.kind,
-          'terasky.backstage.io/kubernetes-resource-name': resource.metadata.name,
-          'terasky.backstage.io/kubernetes-resource-api-version': resource.apiVersion,
-          'terasky.backstage.io/kubernetes-resource-namespace': resource.metadata.namespace || '',
-          ...customAnnotations,
-          ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
-            'backstage.io/kubernetes-cluster': resource.clusterName,
-          } : {})
-        },
-        tags: [`cluster:${resource.clusterName}`, `kind:${resource.kind?.toLowerCase()}`],
-      },
-      spec: {
-        type: annotations[`${prefix}/component-type`] || 'service',
-        lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
-        dependsOn: annotations[`${prefix}/dependsOn`]?.split(','),
-        providesApis: annotations[`${prefix}/providesApis`]?.split(','),
-        consumesApis: annotations[`${prefix}/consumesApis`]?.split(','),
-        ...(annotations[`${prefix}/subcomponent-of`] && {
-          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
-        }),
-      },
-    };
+    // Create component entity using ComponentEntityBuilder
+    const componentEntity = new ComponentEntityBuilder()
+      .withKubernetesMetadata(
+        resource,
+        resource.clusterName,
+        systemNamespaceValue,
+        systemNameValue,
+        systemReferencesNamespaceValue,
+        prefix
+      )
+      .withLinks(this.parseBackstageLinks(resource.metadata.annotations || {}))
+      .withAnnotations({
+        ...Object.fromEntries(
+          Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+        ),
+        'terasky.backstage.io/kubernetes-resource-kind': resource.kind,
+        'terasky.backstage.io/kubernetes-resource-name': resource.metadata.name,
+        'terasky.backstage.io/kubernetes-resource-api-version': resource.apiVersion,
+        'terasky.backstage.io/kubernetes-resource-namespace': resource.metadata.namespace || '',
+        ...customAnnotations,
+        ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
+          'backstage.io/kubernetes-cluster': resource.clusterName,
+        } : {})
+      })
+      .build();
 
     const entities: Entity[] = [];
     if (this.validateEntityName(systemEntity)) {
@@ -382,38 +367,29 @@ export class KubernetesEntityProvider implements EntityProvider {
       systemReferencesNamespaceValue = 'default';
     }
 
-    const entity: Entity = {
-      apiVersion: 'backstage.io/v1alpha1',
-      kind: 'Component',
-      metadata: {
-        name: annotations[`${prefix}/name`] || claim.metadata.name,
-        title: annotations[`${prefix}/title`] || claim.metadata.name,
-        tags: [`cluster:${claim.clusterName}`, `kind:${crKind.toLowerCase()}`],
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        links: this.parseBackstageLinks(claim.metadata.annotations || {}),
-        annotations: {
-          ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
-          ),
-          [`${prefix}/component-type`]: 'crossplane-claim',
-          ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
-            'backstage.io/kubernetes-cluster': clusterName,
-          } : {}),
-          ...customAnnotations,
-          ...crossplaneAnnotations,
-        },
-      },
-      spec: {
-        type: 'crossplane-claim',
-        lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] ? `${systemReferencesNamespaceValue}/${annotations[`${prefix}/owner`]}` : `${systemReferencesNamespaceValue}/kubernetes-auto-ingested`,
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
-        consumesApis: [`${systemReferencesNamespaceValue}/${claim.kind}-${claim.apiVersion.split('/').join('--')}`],
-        ...(annotations[`${prefix}/subcomponent-of`] && {
-          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
-        }),
-      },
-    };
+    // Create component entity using ComponentEntityBuilder with Crossplane claim metadata
+    const entity = new ComponentEntityBuilder()
+      .withCrossplaneClaimMetadata(
+        claim,
+        clusterName,
+        systemNamespaceValue,
+        systemNameValue,
+        systemReferencesNamespaceValue,
+        prefix
+      )
+      .withLinks(this.parseBackstageLinks(claim.metadata.annotations || {}))
+      .withAnnotations({
+        ...Object.fromEntries(
+          Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+        ),
+        [`${prefix}/component-type`]: 'crossplane-claim',
+        ...(systemNameModel === 'cluster-namespace' || systemNamespaceModel === 'cluster' ? {
+          'backstage.io/kubernetes-cluster': clusterName,
+        } : {}),
+        ...customAnnotations,
+        ...crossplaneAnnotations,
+      })
+      .build();
 
     return this.validateEntityName(entity) ? entity : undefined;
   }
@@ -492,35 +468,26 @@ export class KubernetesEntityProvider implements EntityProvider {
       systemReferencesNamespaceValue = 'default';
     }
 
-    const entity: Entity = {
-      apiVersion: 'backstage.io/v1alpha1',
-      kind: 'Component',
-      metadata: {
-        name: annotations[`${prefix}/name`] || xr.metadata.name,
-        title: annotations[`${prefix}/title`] || xr.metadata.name,
-        tags: [`cluster:${xr.clusterName}`, `kind:${kind.toLowerCase()}`],
-        namespace: annotations[`${prefix}/backstage-namespace`] || systemNamespaceValue,
-        links: this.parseBackstageLinks(xr.metadata.annotations || {}),
-        annotations: {
-          ...Object.fromEntries(
-            Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
-          ),
-          'backstage.io/kubernetes-cluster': clusterName,
-          ...customAnnotations,
-          ...crossplaneAnnotations,
-        },
-      },
-      spec: {
-        type: 'crossplane-xr',
-        lifecycle: annotations[`${prefix}/lifecycle`] || 'production',
-        owner: annotations[`${prefix}/owner`] || 'kubernetes-auto-ingested',
-        system: annotations[`${prefix}/system`] || `${systemReferencesNamespaceValue}/${systemNameValue}`,
-        consumesApis: [`${systemReferencesNamespaceValue}/${xr.kind}-${xr.apiVersion.split('/').join('--')}`],
-        ...(annotations[`${prefix}/subcomponent-of`] && {
-          subcomponentOf: annotations[`${prefix}/subcomponent-of`],
-        }),
-      },
-    };
+    // Create component entity using ComponentEntityBuilder with Crossplane XR metadata
+    const entity = new ComponentEntityBuilder()
+      .withCrossplaneXRMetadata(
+        xr,
+        clusterName,
+        systemNamespaceValue,
+        systemNameValue,
+        systemReferencesNamespaceValue,
+        prefix
+      )
+      .withLinks(this.parseBackstageLinks(xr.metadata.annotations || {}))
+      .withAnnotations({
+        ...Object.fromEntries(
+          Object.entries(annotations).filter(([key]) => key !== `${prefix}/links`)
+        ),
+        'backstage.io/kubernetes-cluster': clusterName,
+        ...customAnnotations,
+        ...crossplaneAnnotations,
+      })
+      .build();
 
     return this.validateEntityName(entity) ? entity : undefined;
   }
