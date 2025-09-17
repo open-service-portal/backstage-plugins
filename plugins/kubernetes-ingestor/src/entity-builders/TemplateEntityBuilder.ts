@@ -1,13 +1,13 @@
 import { Entity } from '@backstage/catalog-model';
+import { BaseBuilder } from './BaseBuilder';
 
 /**
  * Builder for creating Template entities
  */
-export class TemplateEntityBuilder {
-  private entity: Entity;
+export class TemplateEntityBuilder extends BaseBuilder<Entity> {
 
   constructor() {
-    this.entity = {
+    super({
       apiVersion: 'scaffolder.backstage.io/v1beta3',
       kind: 'Template',
       metadata: {
@@ -24,65 +24,65 @@ export class TemplateEntityBuilder {
         steps: [],
         output: {},
       },
-    };
+    });
   }
 
   withName(name: string): this {
-    this.entity.metadata.name = name;
+    this.data.metadata.name = name;
     return this;
   }
 
   withTitle(title: string): this {
-    this.entity.metadata.title = title;
+    this.data.metadata.title = title;
     return this;
   }
 
   withDescription(description: string): this {
-    this.entity.metadata.description = description;
+    this.data.metadata.description = description;
     return this;
   }
 
   withType(type: string): this {
-    this.entity.spec!.type = type;
+    this.data.spec!.type = type;
     return this;
   }
 
   withLabels(labels: Record<string, string>): this {
-    this.entity.metadata.labels = labels;
+    this.data.metadata.labels = labels;
     return this;
   }
 
   withTags(tags: string[]): this {
-    this.entity.metadata.tags = tags;
+    this.data.metadata.tags = tags;
     return this;
   }
 
   withAnnotations(annotations: Record<string, string>): this {
-    this.entity.metadata.annotations = {
-      ...this.entity.metadata.annotations,
+    this.data.metadata.annotations = {
+      ...this.data.metadata.annotations,
       ...annotations,
     };
     return this;
   }
 
   withParameters(parameters: any[]): this {
-    this.entity.spec!.parameters = parameters;
+    this.data.spec!.parameters = parameters;
     return this;
   }
 
   withSteps(steps: any[]): this {
-    this.entity.spec!.steps = steps;
+    this.data.spec!.steps = steps;
     return this;
   }
 
   withOutput(output: any): this {
-    this.entity.spec!.output = output;
+    this.data.spec!.output = output;
     return this;
   }
 
   withOutputLinks(links: any[]): this {
-    const existingOutput = this.entity.spec!.output;
-    this.entity.spec!.output = {
+    const existingOutput = this.data.spec!.output;
+    this.data.spec!.output = {
       ...(existingOutput && typeof existingOutput === 'object' ? existingOutput : {}),
       links,
     };
@@ -139,7 +139,4 @@ export class TemplateEntityBuilder {
     });
   }
 
-  build(): Entity {
-    return this.entity;
-  }
 }

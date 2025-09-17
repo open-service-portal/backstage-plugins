@@ -1,14 +1,14 @@
 import { Entity } from '@backstage/catalog-model';
 import { BackstageLink } from '../interfaces';
+import { BaseBuilder } from './BaseBuilder';
 
 /**
  * Builder for creating Component entities
  */
-export class ComponentEntityBuilder {
-  private entity: Entity;
+export class ComponentEntityBuilder extends BaseBuilder<Entity> {
 
   constructor() {
-    this.entity = {
+    super({
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'Component',
       metadata: {
@@ -26,91 +26,91 @@ export class ComponentEntityBuilder {
         owner: 'kubernetes-auto-ingested',
         system: 'default',
       },
-    };
+    });
   }
 
   withName(name: string): this {
-    this.entity.metadata.name = name;
+    this.data.metadata.name = name;
     return this;
   }
 
   withTitle(title: string): this {
-    this.entity.metadata.title = title;
+    this.data.metadata.title = title;
     return this;
   }
 
   withDescription(description: string): this {
-    this.entity.metadata.description = description;
+    this.data.metadata.description = description;
     return this;
   }
 
   withNamespace(namespace: string): this {
-    this.entity.metadata.namespace = namespace;
+    this.data.metadata.namespace = namespace;
     return this;
   }
 
   withTags(tags: string[]): this {
-    this.entity.metadata.tags = tags;
+    this.data.metadata.tags = tags;
     return this;
   }
 
   withLinks(links: BackstageLink[]): this {
-    this.entity.metadata.links = links;
+    this.data.metadata.links = links;
     return this;
   }
 
   withAnnotations(annotations: Record<string, string>): this {
-    this.entity.metadata.annotations = {
-      ...this.entity.metadata.annotations,
+    this.data.metadata.annotations = {
+      ...this.data.metadata.annotations,
       ...annotations,
     };
     return this;
   }
 
   withType(type: string): this {
-    this.entity.spec!.type = type;
+    this.data.spec!.type = type;
     return this;
   }
 
   withLifecycle(lifecycle: string): this {
-    this.entity.spec!.lifecycle = lifecycle;
+    this.data.spec!.lifecycle = lifecycle;
     return this;
   }
 
   withOwner(owner: string): this {
-    this.entity.spec!.owner = owner;
+    this.data.spec!.owner = owner;
     return this;
   }
 
   withSystem(system: string): this {
-    this.entity.spec!.system = system;
+    this.data.spec!.system = system;
     return this;
   }
 
   withDependsOn(dependsOn: string[] | undefined): this {
     if (dependsOn) {
-      this.entity.spec!.dependsOn = dependsOn;
+      this.data.spec!.dependsOn = dependsOn;
     }
     return this;
   }
 
   withProvidesApis(apis: string[] | undefined): this {
     if (apis) {
-      this.entity.spec!.providesApis = apis;
+      this.data.spec!.providesApis = apis;
     }
     return this;
   }
 
   withConsumesApis(apis: string[] | undefined): this {
     if (apis) {
-      this.entity.spec!.consumesApis = apis;
+      this.data.spec!.consumesApis = apis;
     }
     return this;
   }
 
   withSubcomponentOf(subcomponentOf: string | undefined): this {
     if (subcomponentOf) {
-      this.entity.spec!.subcomponentOf = subcomponentOf;
+      this.data.spec!.subcomponentOf = subcomponentOf;
     }
     return this;
   }
@@ -210,7 +210,4 @@ export class ComponentEntityBuilder {
       .withSubcomponentOf(annotations[`${prefix}/subcomponent-of`]);
   }
 
-  build(): Entity {
-    return this.entity;
-  }
 }

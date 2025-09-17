@@ -1,13 +1,13 @@
 import { Entity } from '@backstage/catalog-model';
+import { BaseBuilder } from './BaseBuilder';
 
 /**
  * Builder for creating API entities
  */
-export class APIEntityBuilder {
-  private entity: Entity;
+export class APIEntityBuilder extends BaseBuilder<Entity> {
 
   constructor() {
-    this.entity = {
+    super({
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'API',
       metadata: {
@@ -22,49 +22,49 @@ export class APIEntityBuilder {
         system: 'kubernets-auto-ingested',
         definition: '',
       },
-    };
+    });
   }
 
   withName(name: string): this {
-    this.entity.metadata.name = name;
+    this.data.metadata.name = name;
     return this;
   }
 
   withTitle(title: string): this {
-    this.entity.metadata.title = title;
+    this.data.metadata.title = title;
     return this;
   }
 
   withAnnotations(annotations: Record<string, string>): this {
-    this.entity.metadata.annotations = {
-      ...this.entity.metadata.annotations,
+    this.data.metadata.annotations = {
+      ...this.data.metadata.annotations,
       ...annotations,
     };
     return this;
   }
 
   withDefinition(definition: string): this {
-    this.entity.spec!.definition = definition;
+    this.data.spec!.definition = definition;
     return this;
   }
 
   withOwner(owner: string): this {
-    this.entity.spec!.owner = owner;
+    this.data.spec!.owner = owner;
     return this;
   }
 
   withSystem(system: string): this {
-    this.entity.spec!.system = system;
+    this.data.spec!.system = system;
     return this;
   }
 
   withLifecycle(lifecycle: string): this {
-    this.entity.spec!.lifecycle = lifecycle;
+    this.data.spec!.lifecycle = lifecycle;
     return this;
   }
 
   withType(type: string): this {
-    this.entity.spec!.type = type;
+    this.data.spec!.type = type;
     return this;
   }
 
@@ -108,7 +108,4 @@ export class APIEntityBuilder {
       });
   }
 
-  build(): Entity {
-    return this.entity;
-  }
 }

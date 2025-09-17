@@ -1,13 +1,13 @@
 import { Entity } from '@backstage/catalog-model';
+import { BaseBuilder } from './BaseBuilder';
 
 /**
  * Builder for creating System entities
  */
-export class SystemEntityBuilder {
-  private entity: Entity;
+export class SystemEntityBuilder extends BaseBuilder<Entity> {
 
   constructor() {
-    this.entity = {
+    super({
       apiVersion: 'backstage.io/v1alpha1',
       kind: 'System',
       metadata: {
@@ -19,40 +19,40 @@ export class SystemEntityBuilder {
         owner: 'kubernetes-auto-ingested',
         type: 'kubernetes-namespace',
       },
-    };
+    });
   }
 
   withName(name: string): this {
-    this.entity.metadata.name = name;
+    this.data.metadata.name = name;
     return this;
   }
 
   withNamespace(namespace: string): this {
-    this.entity.metadata.namespace = namespace;
+    this.data.metadata.namespace = namespace;
     return this;
   }
 
   withAnnotations(annotations: Record<string, string>): this {
-    this.entity.metadata.annotations = {
-      ...this.entity.metadata.annotations,
+    this.data.metadata.annotations = {
+      ...this.data.metadata.annotations,
       ...annotations,
     };
     return this;
   }
 
   withOwner(owner: string): this {
-    this.entity.spec!.owner = owner;
+    this.data.spec!.owner = owner;
     return this;
   }
 
   withType(type: string): this {
-    this.entity.spec!.type = type;
+    this.data.spec!.type = type;
     return this;
   }
 
   withDomain(domain: string | undefined): this {
     if (domain) {
-      this.entity.spec!.domain = domain;
+      this.data.spec!.domain = domain;
     }
     return this;
   }
@@ -83,7 +83,4 @@ export class SystemEntityBuilder {
       .withDomain(annotations[`${prefix}/domain`]);
   }
 
-  build(): Entity {
-    return this.entity;
-  }
 }
